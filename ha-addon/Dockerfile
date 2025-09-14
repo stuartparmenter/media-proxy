@@ -1,0 +1,51 @@
+# must be first so FROM can use it
+ARG BUILD_FROM
+
+# ----- Stage 1: fetch just the app bits from the repo -----
+FROM alpine/git:2.45.2 AS fetch
+ARG APP_REPO=https://github.com/stuartparmenter/media-proxy
+ARG APP_REF=main
+ARG APP_SUBDIR=src
+
+RUN git clone --filter=blob:none --no-checkout "${APP_REPO}" /src \
+ && cd /src \
+ && git sparse-checkout init --cone \
+ && git sparse-checkout set "${APP_SUBDIR}" \
+ && git checkout "${APP_REF}"
+
+# ----- Stage 2: Home Assistant base runtime (Alpine/musl) -----
+FROM $BUILD_FROM AS runtime
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+# Runtime deps
+# Runtime deps (+ HW decode support for Intel iGPU)
+RUN apk add --no-cache \
+      python3 \
+      py3-pip \
+      ffmpeg \
+      libdrm \
+      libva \
+      intel-media-driver \
+      libva-utils \
+      mesa-va-gallium
+
+WORKDIR /app
+
+# Copy the entire src/ tree from stage 1 (no ARG in this stage)
+COPY --from=fetch /src/src/ /app/src/
+
+# Build-only deps for wheels + create venv + pip install into venv, then clean
+RUN apk add --no-cache --virtual .build-deps \
+      build-base python3-dev linux-headers ffmpeg-dev pkgconf \
+ && python3 -m venv /opt/venv \
+ && . /opt/venv/bin/activate \
+ && pip install --upgrade pip \
+ && pip install -r /app/src/requirements.txt -c /app/src/constraints.txt \
+ && apk del .build-deps
+
+# Use the venv's python/pip by default
+ENV PATH="/opt/venv/bin:${PATH}"
+
+# Launcher
+COPY run.py /run.py
+CMD ["python3", "/run.py"]

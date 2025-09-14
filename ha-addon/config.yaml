@@ -1,0 +1,30 @@
+name: Media Proxy
+version: "0.1.7"
+slug: media_proxy
+description: "WebSocket-controlled media proxy that outputs DDP (UDP)"
+url: https://github.com/stuartparmenter/media-proxy
+arch: [aarch64, amd64, armv7]
+startup: services
+init: false
+host_network: true          # DDP over UDP to arbitrary targets = easiest with host net
+ingress: false
+panel_icon: mdi:video-wireless
+map: [config:ro, media:ro]
+environment: { PYTHONUNBUFFERED: "1" }
+ports:
+  8788/tcp: 8788            # WebSocket control (/control)
+ports_description:
+  8788/tcp: WebSocket control (/control)
+options:
+  host: "0.0.0.0"
+  port: 8788
+  # optional: point at a file in HA's /config for defaults
+  config_path: "/config/media-proxy.yaml"
+  extra_args: ""
+schema:
+  host: str
+  port: int
+  config_path: str
+  extra_args: str
+devices:
+  - /dev/dri
