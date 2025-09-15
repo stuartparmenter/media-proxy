@@ -1075,20 +1075,31 @@ def _normalize_fmt(s: str) -> str:
     return s
 
 def _rgb888_to_565_bytes(rgb_bytes: bytes, endian: str) -> bytes:
-    """Convert packed RGB888 (R,G,B byte triplets) to packed RGB565 bytes with specified endianness."""
+    """Convert RGB888 to RGB565, only dither for stills."""
     arr = np.frombuffer(rgb_bytes, dtype=np.uint8)
     if arr.size % 3 != 0:
         # Truncate any ragged tail (shouldn't happen for correctly sized frames)
         arr = arr[: (arr.size // 3) * 3]
-    pix = arr.reshape((-1, 3))
-    r = (pix[:, 0] >> 3).astype(np.uint16)
-    g = (pix[:, 1] >> 2).astype(np.uint16)
-    b = (pix[:, 2] >> 3).astype(np.uint16)
+
+    pix = arr.reshape((-1, 3)).astype(np.float32)
+
+    # Apply shadow lifting
+    shadow_lifted = np.where(
+        pix < 40,
+        pix * 1.3,  # Stronger shadow boost
+        pix + (40 - pix) * 0.1
+    )
+    pix = np.clip(shadow_lifted, 0, 255)
+
+    # Simple quantization with proper rounding
+    r = (pix[:, 0] / 255 * 31 + 0.5).astype(np.uint16)
+    g = (pix[:, 1] / 255 * 63 + 0.5).astype(np.uint16)
+    b = (pix[:, 2] / 255 * 31 + 0.5).astype(np.uint16)
+
     v = (r << 11) | (g << 5) | b
     if endian == "be":
-        return v.byteswap().tobytes()  # store MSB,LSB
+        return v.byteswap().tobytes()
     else:
-        # '<' little-endian memory order
         return v.tobytes()
 
 def _ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str = "rgb888"):
