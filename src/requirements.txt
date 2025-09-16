@@ -9,4 +9,4 @@ websockets>=12,<16
 yt-dlp>=2024.10,<2026
 
 # Optional perf (POSIX only)
-uvloop>=0.19 ; platform_system!="Windows"
+uvloop>=0.21 ; platform_system!="Windows"

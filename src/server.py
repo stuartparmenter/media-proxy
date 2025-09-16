@@ -1778,6 +1778,13 @@ def _require_fields(msg, fields, verb):
 
 if __name__ == "__main__":
     try:
+        if os.name != "nt":
+            import uvloop
+            asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+            print("[perf] uvloop enabled")
+        else:
+            print("[perf] using default asyncio loop on Windows")
+
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
