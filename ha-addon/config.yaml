@@ -19,7 +19,7 @@ options:
   host: "0.0.0.0"
   port: 8788
   # optional: point at a file in HA's /config for defaults
-  config_path: "/config/media-proxy.yaml"
+  config_path: "/config/media-proxy/config.yaml"
   extra_args: ""
 schema:
   host: str
