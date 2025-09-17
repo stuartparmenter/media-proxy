@@ -25,7 +25,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         # method: lanczos | bicubic | bilinear | box | nearest
         "method": "lanczos",
         # Do resize in linear light (gamma-aware) to preserve tones
-        "gamma_correct": True,
+        "gamma_correct": False,
         # Optional mild sharpen after resize (0 disables)
         "unsharp": {"amount": 0.0, "radius": 0.6, "threshold": 2}
     },
