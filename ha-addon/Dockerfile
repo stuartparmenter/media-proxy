@@ -18,16 +18,18 @@ FROM $BUILD_FROM AS runtime
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 # Runtime deps
-# Runtime deps (+ HW decode support for Intel iGPU)
+# Runtime deps (+ HW decode support for Intel iGPU on x86 platforms)
 RUN apk add --no-cache \
       python3 \
       py3-pip \
       ffmpeg \
       libdrm \
       libva \
-      intel-media-driver \
       libva-utils \
-      mesa-va-gallium
+      mesa-va-gallium \
+ && if [ "$(uname -m)" = "x86_64" ] || [ "$(uname -m)" = "i386" ]; then \
+      apk add --no-cache intel-media-driver; \
+    fi
 
 WORKDIR /app
 
