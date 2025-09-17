@@ -28,3 +28,4 @@ schema:
   extra_args: str
 devices:
   - /dev/dri
+tmpfs: true  # Enable tmpfs for /tmp - faster image caching using RAM

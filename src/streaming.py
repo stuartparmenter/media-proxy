@@ -7,36 +7,20 @@ from typing import Dict, Any, AsyncIterator, Tuple, Optional
 from urllib.parse import unquote
 
 from .config import Config
+from .control.fields import ControlFields
 from .media.sources import resolve_media_source, StreamUrlExpiredError
-from .media.images import iter_frames_imageio
+from .media.images import iter_frames_pil, cleanup_active_image_sources
 from .media.video import iter_frames_pyav
 from .output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata
 from .utils.helpers import (
     resolve_local_path, is_http_url, probe_http_content_type,
-    parse_expand_mode, parse_hw_preference, parse_pace_hz, truthy, is_youtube_url
+    parse_expand_mode, parse_hw_preference, parse_pace_hz, truthy, is_youtube_url,
+    normalize_pixel_format
 )
 from .utils.hardware import choose_decode_preference
 
 
-async def _get_gif_fps_from_pyav(src_url: str) -> Optional[float]:
-    """Try to get accurate FPS from a GIF using PyAV (quick probe)."""
-    try:
-        source = await resolve_media_source(src_url)
-
-        # Quick probe with PyAV to get fps
-        import av
-        container = av.open(source.resolved_url, mode="r", options=source.options)
-        try:
-            vstream = next((s for s in container.streams if s.type == "video"), None)
-            if vstream and vstream.average_rate:
-                fps = float(vstream.average_rate)
-                print(f"[gif] PyAV detected fps={fps}")
-                return fps
-        finally:
-            container.close()
-    except Exception as e:
-        print(f"[gif] PyAV fps probe failed: {e!r}")
-    return None
+# Removed _get_gif_fps_from_pyav - PIL handles GIF timing directly
 
 
 async def iter_frames_async(
@@ -56,12 +40,8 @@ async def iter_frames_async(
     # Prefer extension check first for local paths
     is_image_ext = any(low.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"))
     if is_image_ext:
-        # For GIFs, try to get accurate FPS from PyAV first
-        actual_fps = None
-        if low.endswith(".gif"):
-            actual_fps = await _get_gif_fps_from_pyav(src_url)
-
-        for rgb888, delay_ms in iter_frames_imageio(src_url, size, loop_video, fps_override=actual_fps):
+        # PIL handles all image timing directly - no need for PyAV fps detection
+        for rgb888, delay_ms in iter_frames_pil(src_url, size, loop_video):
             yield rgb888, delay_ms
         return
 
@@ -70,8 +50,8 @@ async def iter_frames_async(
         ct = probe_http_content_type(src_url)
         if ct:
             if ct.startswith("image/"):
-                print(f"[detect] http Content-Type={ct} -> using imageio still path")
-                for rgb888, delay_ms in iter_frames_imageio(src_url, size, loop_video):
+                print(f"[detect] http Content-Type={ct} -> using PIL image path")
+                for rgb888, delay_ms in iter_frames_pil(src_url, size, loop_video):
                     yield rgb888, delay_ms
                 return
 
@@ -129,35 +109,61 @@ async def iter_frames_async(
 async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task:
     """Create a streaming task that connects media input to output."""
     config = Config()
-    
-    # Extract parameters
+
+    # Extract parameters using ControlFields for consistency
     output_id = int(params["out"])
     width = int(params["w"])
     height = int(params["h"])
     src = str(params["src"])
     ddp_port = int(params.get("ddp_port", 4048))
-    
-    # Parse options
-    opts = {
-        "loop": truthy(str(params.get("loop", config.get("playback.loop")))),
-        "expand_mode": parse_expand_mode(params.get("expand"), config.get("video.expand_mode")),
-        "hw": parse_hw_preference(params.get("hw"), config.get("hw.prefer")),
-        "pace_hz": parse_pace_hz(params.get("pace", 0)),
-        "ema_alpha": max(0.0, min(float(params.get("ema", 0.0)), 1.0)),
-        "fmt": params.get("fmt", "rgb888"),
-    }
-    
+
+    # Parse options using field-aware helpers
+    opts = {}
+
+    # Process each field that can be applied to the stream
+    for field_name, value in params.items():
+        field_def = ControlFields.get_field_info(field_name)
+        if field_def is None:
+            continue
+
+        if field_name == "loop":
+            opts["loop"] = truthy(str(value)) if value is not None else config.get("playback.loop")
+        elif field_name == "expand":
+            opts["expand_mode"] = parse_expand_mode(value, config.get("video.expand_mode"))
+        elif field_name == "hw":
+            opts["hw"] = parse_hw_preference(value, config.get("hw.prefer"))
+        elif field_name == "pace":
+            opts["pace_hz"] = parse_pace_hz(value)
+        elif field_name == "ema":
+            opts["ema_alpha"] = max(0.0, min(float(value), 1.0)) if value is not None else 0.0
+        elif field_name == "fmt":
+            opts["fmt"] = normalize_pixel_format(str(value)) if value is not None else "rgb888"
+
+    # Set defaults for any missing options
+    if "loop" not in opts:
+        opts["loop"] = config.get("playback.loop")
+    if "expand_mode" not in opts:
+        opts["expand_mode"] = config.get("video.expand_mode")
+    if "hw" not in opts:
+        opts["hw"] = config.get("hw.prefer")
+    if "pace_hz" not in opts:
+        opts["pace_hz"] = 0
+    if "ema_alpha" not in opts:
+        opts["ema_alpha"] = 0.0
+    if "fmt" not in opts:
+        opts["fmt"] = normalize_pixel_format("rgb888")
+
     # Validate local file exists
     src_url = unquote(src)
     local_path = resolve_local_path(src_url)
     if local_path is not None and not os.path.exists(local_path):
         raise FileNotFoundError(f"no such file: {local_path}")
-    
+
     print(f"* start_stream {session.client_ip} dev={session.device_id} out={output_id} "
           f"size={width}x{height} ddp_port={ddp_port} src={src} "
           f"pace={opts['pace_hz']} ema={opts['ema_alpha']} expand={opts['expand_mode']} "
           f"loop={opts['loop']} hw={opts['hw']} fmt={opts['fmt']}")
-    
+
     # Create the streaming task
     task = asyncio.create_task(
         streaming_task(
@@ -169,7 +175,7 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
             opts=opts
         )
     )
-    
+
     def on_done(t: asyncio.Task):
         try:
             exc = t.exception()
@@ -181,7 +187,7 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
         if exc:
             print(f"[task] out={output_id} crashed: {exc!r}")
     task.add_done_callback(on_done)
-    
+
     return task
 
 
@@ -215,16 +221,18 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
     
     try:
         await output.start()
-        
+
         if opts["pace_hz"] > 0:
             # Paced mode: producer + sampler
             await _run_paced_streaming(output, size, src, opts, hw_prefer)
         else:
             # Native cadence mode
             await _run_native_streaming(output, size, src, opts, hw_prefer)
-            
+
     finally:
         await output.stop()
+        # Clean up any temp files from image caching
+        cleanup_active_image_sources()
 
 
 async def _run_native_streaming(output, size: Tuple[int, int], src: str, 
