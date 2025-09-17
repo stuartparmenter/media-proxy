@@ -4,6 +4,7 @@ slug: media_proxy
 description: "WebSocket-controlled media proxy that outputs DDP (UDP)"
 url: https://github.com/stuartparmenter/media-proxy
 arch: [aarch64, amd64, armv7]
+image: "ghcr.io/stuartparmenter/{arch}-addon-media-proxy"
 startup: services
 init: false
 host_network: true          # DDP over UDP to arbitrary targets = easiest with host net
