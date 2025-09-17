@@ -1,7 +1,10 @@
+# © Copyright 2025 Stuart Parmenter
+# SPDX-License-Identifier: MIT
+
 import json, os, shlex, sys
 
 OPTIONS = "/data/options.json"
-SERVER  = "/app/src/server.py"
+SERVER  = "/app/src/run.py"
 
 def main():
     try:
