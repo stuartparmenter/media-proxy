@@ -29,7 +29,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         # Optional mild sharpen after resize (0 disables)
         "unsharp": {"amount": 0.0, "radius": 0.6, "threshold": 2}
     },
-    "log": {"send_ms": False, "rate_ms": 1000, "detail": False, "metrics": True},
+    "log": {
+        "send_ms": False,
+        "rate_ms": 5000,
+        "detail": False,
+        "metrics": True
+    },
     "net": {
         "win_timer_res": True,
         "spread_packets": True,

@@ -116,9 +116,11 @@ class DDPOutput(BufferedOutputProtocol):
         self.socket: Optional[socket.socket] = None
         self.seq = 0
         
-        # Performance tracking
+        # Performance tracking and logging configuration
+        self.log_metrics = config.get("log_metrics")
+        self.log_detail = config.get("log_detail")
         self.tracker = PerformanceTracker(
-            log_interval_s=config.get("log_interval_s", 1.0)
+            log_interval_s=config.get("log_interval_s")
         )
         
         # Frame format configuration
@@ -243,9 +245,7 @@ class DDPOutput(BufferedOutputProtocol):
         # Log metrics if needed
         # For single-frame/still content, log once per frame since they're rare
         # For looping content, respect the minimum 5-second interval
-        should_log = self.tracker.should_log(is_loop_end=metadata.is_last_frame)
-
-        if should_log:
+        if self.log_metrics and self.tracker.should_log(is_loop_end=metadata.is_last_frame):
             await self._log_metrics()
 
         # Track loop starts for very short content
@@ -308,6 +308,7 @@ class DDPOutput(BufferedOutputProtocol):
         if burst > 0:
             print(f"[ddp] still resend burst={burst} output={self.target.output_id}")
             for i in range(burst):
+                before_enq = self._packets_enqueued
                 packets = list(ddp_iter_packets(
                     frame_data, self.target.output_id, seq, fmt=self.pixel_format
                 ))
@@ -315,19 +316,26 @@ class DDPOutput(BufferedOutputProtocol):
                     self.sender.sendto(pkt, addr)
                     self.tracker.record_packet()
                     self._packets_enqueued += 1
-                    
+
+                after_enq = self._packets_enqueued
+                if self.log_detail:
+                    print(f"[send] still-burst out={self.target.output_id} {i+1}/{burst} enq+={after_enq-before_enq} q={len(self._frame_queue)}/{self._max_queue_size}")
+
                 if spacing_ms > 0 and i < burst - 1:
                     await asyncio.sleep(spacing_ms / 1000.0)
                     
         # Tail phase
         if tail_s > 0 and tail_hz > 0:
-            print(f"[ddp] still resend tail={tail_s}s @ {tail_hz}Hz output={self.target.output_id}")
+            est = int(tail_s * tail_hz)
+            print(f"[ddp] still resend tail={tail_s}s @ {tail_hz}Hz output={self.target.output_id} (~{est} sends)")
             loop = asyncio.get_running_loop()
             end_time = loop.time() + tail_s
             tick = 1.0 / tail_hz
             next_time = loop.time()
-            
+            i = 0
+
             while loop.time() < end_time:
+                before_enq = self._packets_enqueued
                 packets = list(ddp_iter_packets(
                     frame_data, self.target.output_id, seq, fmt=self.pixel_format
                 ))
@@ -335,9 +343,14 @@ class DDPOutput(BufferedOutputProtocol):
                     self.sender.sendto(pkt, addr)
                     self.tracker.record_packet()
                     self._packets_enqueued += 1
-                    
+
+                after_enq = self._packets_enqueued
+                if self.log_detail:
+                    print(f"[send] still-tail out={self.target.output_id} {i}/{est} enq+={after_enq-before_enq} q={len(self._frame_queue)}/{self._max_queue_size}")
+
                 await asyncio.sleep(max(0.0, next_time - loop.time()))
                 next_time += tick
+                i += 1
                 
     async def _log_metrics(self) -> None:
         """Log performance metrics."""
