@@ -49,22 +49,27 @@ class RateMeter:
 
 class PerformanceTracker:
     """Tracks multiple performance metrics."""
-    
+
     def __init__(self, log_interval_s: float = 1.0):
         self.log_interval_s = log_interval_s
+        self.min_log_interval_s = 5.0  # Minimum 5 seconds between logs for long content
         self.last_log = time.perf_counter()
-        
+
         self.frame_meter = RateMeter()
         self.packet_meter = RateMeter()
-        
+
         # Counters
         self.frames_processed = 0
         self.packets_sent = 0
         self.bytes_sent = 0
         self.queue_drops = 0
-        
+
         # Queue occupancy samples
         self.queue_samples: List[int] = []
+
+        # Loop tracking for short files
+        self.loop_count = 0
+        self.last_loop_log = 0
         
     def record_frame(self) -> None:
         """Record a frame being processed."""
@@ -89,11 +94,31 @@ class PerformanceTracker:
     def record_queue_size(self, size: int) -> None:
         """Record current queue occupancy."""
         self.queue_samples.append(size)
-        
-    def should_log(self) -> bool:
-        """Check if it's time to log metrics."""
+
+    def record_loop_start(self) -> None:
+        """Record that a new loop has started (for short files)."""
+        self.loop_count += 1
+
+    def should_log(self, *, is_loop_end: bool = False) -> bool:
+        """Check if it's time to log metrics.
+
+        Args:
+            is_loop_end: True if this is the end of a media loop (for short files)
+        """
         now = time.perf_counter()
-        return (now - self.last_log) >= self.log_interval_s
+
+        # For loop ends, log once per loop but respect minimum interval for long content
+        if is_loop_end:
+            # If it's been at least min_log_interval_s since last log, allow logging
+            if (now - self.last_log) >= self.min_log_interval_s:
+                return True
+            # For very short loops, log at least once per loop but not more than every min_log_interval_s
+            elif self.loop_count > self.last_loop_log:
+                return True
+            return False
+
+        # For regular frame processing, use min_log_interval_s as the threshold
+        return (now - self.last_log) >= self.min_log_interval_s
         
     def get_metrics_and_reset(self) -> dict:
         """Get current metrics and reset counters."""
@@ -124,6 +149,7 @@ class PerformanceTracker:
         self.bytes_sent = 0
         self.queue_drops = 0
         self.queue_samples.clear()
+        self.last_loop_log = self.loop_count
         self.last_log = time.perf_counter()
-        
+
         return metrics

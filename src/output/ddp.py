@@ -241,8 +241,16 @@ class DDPOutput(BufferedOutputProtocol):
             await self._handle_still_resends(frame_data)
             
         # Log metrics if needed
-        if self.tracker.should_log():
+        # For single-frame/still content, log once per frame since they're rare
+        # For looping content, respect the minimum 5-second interval
+        should_log = self.tracker.should_log(is_loop_end=metadata.is_last_frame)
+
+        if should_log:
             await self._log_metrics()
+
+        # Track loop starts for very short content
+        if metadata.is_last_frame:
+            self.tracker.record_loop_start()
             
     async def _send_frame_packets(self, frame_data: bytes, metadata: FrameMetadata,
                                 *, spacing_s: Optional[float] = None, group_n: int = 1) -> None:

@@ -208,7 +208,7 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
     
     output_config = {
         "fmt": opts["fmt"],
-        "log_interval_s": config.get("log.rate_ms", 1000) / 1000.0,
+        "log_interval_s": config.get("log.rate_ms", 5000) / 1000.0,  # Default to 5 seconds instead of 1
         "max_queue_size": 4096,
         "mode": "pace" if opts["pace_hz"] > 0 else "native",
         "pace_hz": opts["pace_hz"],
