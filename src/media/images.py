@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 
 from ..config import Config
 from ..utils.helpers import is_http_url
+from .protocol import FrameIterator, FrameIteratorConfig
 
 MIN_DELAY_MS = 10.0  # clamp very small frame delays
 
@@ -132,72 +133,99 @@ def _create_image_source(src_url: str) -> ImageSource:
         raise RuntimeError(f"Failed to create image source: {e}") from e
 
 
-def iter_frames_pil(src_url: str, size: Tuple[int, int], loop_video: bool) -> Iterator[Tuple[bytes, float]]:
-    """Iterate frames from static images or animated GIFs using PIL directly."""
-    config = Config()
 
-    # Default fallback delay (for images without timing info)
-    default_delay_ms = 1000.0 / 10.0
 
-    # Create optimized image source (memory vs temp file)
-    img_source = _create_image_source(src_url)
+class PilFrameIterator(FrameIterator):
+    """Frame iterator for static images and animated GIFs using PIL."""
 
-    try:
-        from .processing import resize_pad_to_rgb_bytes
+    def __init__(self, src_url: str, config: FrameIteratorConfig):
+        super().__init__(src_url, config)
+        self.img_source = None
 
-        # Determine if animated and get frame info
-        with img_source.open_image() as pil_img:
-            is_animated = getattr(pil_img, 'is_animated', False)
-            n_frames = getattr(pil_img, 'n_frames', 1) if is_animated else 1
+    @classmethod
+    def can_handle(cls, src_url: str) -> bool:
+        """Check if this is an image file we can handle."""
+        try:
+            # Quick check based on URL/path extension
+            lower_url = src_url.lower()
+            image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')
+            return any(lower_url.endswith(ext) for ext in image_extensions)
+        except Exception:
+            return False
 
-            # Pre-load frame timings for animated GIFs
-            frame_timings = []
-            if is_animated:
-                for i in range(n_frames):
-                    pil_img.seek(i)
-                    duration = pil_img.info.get('duration', default_delay_ms)
-                    frame_timings.append(max(MIN_DELAY_MS, float(duration)))
+    def __iter__(self) -> Iterator[Tuple[bytes, float]]:
+        """Iterate frames from static images or animated GIFs."""
+        config = Config()
+        size = self.config.size
+        loop_video = self.config.loop_video
 
-                if frame_timings and not hasattr(iter_frames_pil, '_logged_frame_timing'):
-                    print(f"[gif] loaded per-frame timing: {len(frame_timings)} frames")
-                    iter_frames_pil._logged_frame_timing = True
+        # Default fallback delay (for images without timing info)
+        default_delay_ms = 1000.0 / 10.0
 
-        # Main iteration loop
-        while True:
-            saw_frame = False
+        # Create optimized image source (memory vs temp file)
+        self.img_source = _create_image_source(self.src_url)
 
-            if is_animated:
-                # Iterate through all frames
-                for frame_idx in range(n_frames):
-                    with img_source.open_image() as pil_img:
-                        pil_img.seek(frame_idx)
+        try:
+            from .processing import resize_pad_to_rgb_bytes
+
+            # Determine if animated and get frame info
+            with self.img_source.open_image() as pil_img:
+                is_animated = getattr(pil_img, 'is_animated', False)
+                n_frames = getattr(pil_img, 'n_frames', 1) if is_animated else 1
+
+                # Pre-load frame timings for animated GIFs
+                frame_timings = []
+                if is_animated:
+                    for i in range(n_frames):
+                        pil_img.seek(i)
+                        duration = pil_img.info.get('duration', default_delay_ms)
+                        frame_timings.append(max(MIN_DELAY_MS, float(duration)))
+
+                    if frame_timings and not hasattr(PilFrameIterator, '_logged_frame_timing'):
+                        print(f"[gif] loaded per-frame timing: {len(frame_timings)} frames")
+                        PilFrameIterator._logged_frame_timing = True
+
+            # Main iteration loop
+            while True:
+                saw_frame = False
+
+                if is_animated:
+                    # Iterate through all frames
+                    for frame_idx in range(n_frames):
+                        with self.img_source.open_image() as pil_img:
+                            pil_img.seek(frame_idx)
+                            frame_img = pil_img.convert("RGB")
+                            rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
+
+                            # Use pre-loaded timing
+                            delay_ms = frame_timings[frame_idx] if frame_timings else default_delay_ms
+                            final_delay = max(MIN_DELAY_MS, float(delay_ms))
+
+                            yield rgb888, final_delay
+                            saw_frame = True
+                else:
+                    # Static image
+                    with self.img_source.open_image() as pil_img:
                         frame_img = pil_img.convert("RGB")
                         rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
-
-                        # Use pre-loaded timing
-                        delay_ms = frame_timings[frame_idx] if frame_timings else default_delay_ms
-                        final_delay = max(MIN_DELAY_MS, float(delay_ms))
-
-                        yield rgb888, final_delay
+                        yield rgb888, default_delay_ms
                         saw_frame = True
-            else:
-                # Static image
-                with img_source.open_image() as pil_img:
-                    frame_img = pil_img.convert("RGB")
-                    rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
-                    yield rgb888, default_delay_ms
-                    saw_frame = True
 
-            if not loop_video:
-                break
-            if not saw_frame:
-                raise FileNotFoundError(f"cannot decode frames: {src_url}")
+                if not loop_video:
+                    break
+                if not saw_frame:
+                    raise FileNotFoundError(f"cannot decode frames: {self.src_url}")
 
-    except Exception as e2:
-        msg = str(e2).lower()
-        if isinstance(e2, FileNotFoundError) or "no such file" in msg or "not found" in msg:
-            raise FileNotFoundError(f"cannot open source: {src_url}") from e2
-        raise RuntimeError(f"PIL error: {e2}") from e2
-    finally:
-        # Always cleanup resources
-        img_source.cleanup()
+        except Exception as e:
+            msg = str(e).lower()
+            if isinstance(e, FileNotFoundError) or "no such file" in msg or "not found" in msg:
+                raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
+            raise RuntimeError(f"PIL error: {e}") from e
+        finally:
+            self.cleanup()
+
+    def cleanup(self) -> None:
+        """Clean up any resources used by the iterator."""
+        if self.img_source:
+            self.img_source.cleanup()
+            self.img_source = None

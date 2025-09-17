@@ -9,8 +9,8 @@ from urllib.parse import unquote
 from .config import Config
 from .control.fields import ControlFields
 from .media.sources import resolve_media_source, StreamUrlExpiredError
-from .media.images import iter_frames_pil, cleanup_active_image_sources
-from .media.video import iter_frames_pyav
+from .media.protocol import FrameIteratorFactory, FrameIteratorConfig
+from .media.images import cleanup_active_image_sources
 from .output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata
 from .utils.helpers import (
     resolve_local_path, is_http_url, probe_http_content_type,
@@ -32,76 +32,73 @@ async def iter_frames_async(
     hw_prefer: str = None
 ) -> AsyncIterator[Tuple[bytes, float]]:
     """
-    Async version of iter_frames that handles YouTube URL resolution properly.
+    Async version of iter_frames using the new protocol-based approach.
     """
     src_url = unquote(src)
-    low = src_url.lower()
-    
-    # Prefer extension check first for local paths
-    is_image_ext = any(low.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"))
-    if is_image_ext:
-        # PIL handles all image timing directly - no need for PyAV fps detection
-        for rgb888, delay_ms in iter_frames_pil(src_url, size, loop_video):
-            yield rgb888, delay_ms
-        return
-
-    # For HTTP(S) sources where the URL doesn't reveal type, probe Content-Type
-    if is_http_url(src_url):
-        ct = probe_http_content_type(src_url)
-        if ct:
-            if ct.startswith("image/"):
-                print(f"[detect] http Content-Type={ct} -> using PIL image path")
-                for rgb888, delay_ms in iter_frames_pil(src_url, size, loop_video):
-                    yield rgb888, delay_ms
-                return
-
-    # Handle video streams (including YouTube) with retry logic
     original_src = src_url
     max_retries = 3
     retry_count = 0
-    
+
     while True:
         try:
-            # Resolve URL asynchronously if it's a YouTube URL
-            source = await resolve_media_source(src_url)
+            # For YouTube URLs, resolve to get actual stream URL and options
+            if is_youtube_url(src_url):
+                source = await resolve_media_source(src_url)
+                # Update the PyAV iterator's real_src_url for YouTube resolution
+                resolved_url = source.resolved_url
+                # Note: We'll need to pass these options to the iterator somehow
+            else:
+                resolved_url = src_url
 
-            # Use the existing PyAV frame iterator
+            # Create frame iterator configuration
+            config = FrameIteratorConfig(
+                size=size,
+                loop_video=loop_video,
+                expand_mode=expand_mode,
+                hw_prefer=hw_prefer
+            )
+
+            # Use the factory to create the appropriate iterator
+            iterator = FrameIteratorFactory.create(src_url, config)
+
+            # If this is a PyAV iterator and we have a resolved URL, update it
+            if hasattr(iterator, 'real_src_url') and is_youtube_url(src_url):
+                iterator.real_src_url = resolved_url
+
+            # Iterate frames using the protocol
             frames_yielded = False
-            for rgb888, delay_ms in iter_frames_pyav(
-                src_url, source.resolved_url, source.options, size, loop_video,
-                expand_mode=expand_mode, hw_prefer=hw_prefer
-            ):
-                # Reset retry count on first successful frame (indicates successful resolution)
+            for rgb888, delay_ms in iterator:
+                # Reset retry count on first successful frame
                 if not frames_yielded:
                     retry_count = 0
                     frames_yielded = True
                 yield rgb888, delay_ms
-                
+
             # If we get here without exception and we're looping, continue the loop
             if not loop_video:
                 break
-                
+
         except StreamUrlExpiredError as e:
             # URL expired, try to re-resolve
             if not is_youtube_url(original_src):
                 # Non-YouTube URLs can't be re-resolved
                 raise RuntimeError(f"Non-YouTube URL failed and cannot be re-resolved: {e}") from e
-                
+
             retry_count += 1
             if retry_count > max_retries:
                 raise RuntimeError(f"Max retries ({max_retries}) exceeded for YouTube URL resolution") from e
-                
+
             print(f"[retry] YouTube URL expired (attempt {retry_count}/{max_retries}), re-resolving...")
             await asyncio.sleep(0.5)  # Brief delay before retry
             continue
-            
+
         except Exception as e:
             # Other errors are not retryable
             msg = str(e).lower()
             if isinstance(e, FileNotFoundError) or "no such file" in msg or "not found" in msg:
                 raise FileNotFoundError(f"cannot open source: {original_src}") from e
             raise RuntimeError(f"Frame iteration error: {e}") from e
-            
+
         if not loop_video:
             break
 
