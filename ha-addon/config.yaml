@@ -8,9 +8,8 @@ image: "ghcr.io/stuartparmenter/{arch}-addon-media-proxy"
 startup: services
 init: false
 host_network: true          # DDP over UDP to arbitrary targets = easiest with host net
-ingress: false
 panel_icon: mdi:video-wireless
-map: [config:ro, media:ro]
+map: [addon_config, media]
 environment: { PYTHONUNBUFFERED: "1" }
 ports:
   8788/tcp: 8788            # WebSocket control (/control)
@@ -19,7 +18,6 @@ ports_description:
 options:
   host: "0.0.0.0"
   port: 8788
-  # optional: point at a file in HA's /config for defaults
   config_path: "/config/media-proxy/config.yaml"
   extra_args: ""
 schema:
