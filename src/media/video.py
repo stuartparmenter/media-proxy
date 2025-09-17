@@ -350,7 +350,7 @@ class PyAvFrameIterator(FrameIterator):
                     expand_args = ":in_range=auto:out_range=pc"
 
                 # Fit selection
-                fit_mode = str(config.get("video.fit", "auto-cover")).lower()
+                fit_mode = str(config.get("video.fit")).lower()
                 if fit_mode in ("cover", "auto-cover"):
                     n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear:force_original_aspect_ratio=increase" + expand_args)
                     last.link_to(n)

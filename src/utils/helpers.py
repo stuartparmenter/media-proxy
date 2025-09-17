@@ -126,7 +126,7 @@ def compute_spacing_and_group(pkt_count: int, frame_interval_s: float, config: D
         return (None, 1)
 
     net_cfg = config.get("net", {})
-    min_s = float(net_cfg.get("spread_min_ms", 3.0)) / 1000.0
+    min_s = float(net_cfg.get("spread_min_ms")) / 1000.0
     max_sleeps = int(net_cfg.get("spread_max_sleeps", 6))
 
     # Ideal per-packet spacing if we slept once per packet

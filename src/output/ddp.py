@@ -127,8 +127,8 @@ class DDPOutput(BufferedOutputProtocol):
         self.pixel_format = normalize_pixel_format(config.get("fmt", "rgb888"))
         
         # Packet spreading configuration
-        self.spread_enabled = bool(self.config_obj.get("net.spread_packets", True))
-        self.spread_max_fps = int(self.config_obj.get("net.spread_max_fps", 60))
+        self.spread_enabled = bool(self.config_obj.get("net.spread_packets"))
+        self.spread_max_fps = int(self.config_obj.get("net.spread_max_fps"))
         
         # Still frame resend configuration
         self.still_resend_config = self.config_obj.get("playback_still", {})
@@ -296,10 +296,10 @@ class DDPOutput(BufferedOutputProtocol):
         if not self.still_resend_config or not self.sender:
             return
             
-        burst = int(self.still_resend_config.get("burst", 0))
-        spacing_ms = float(self.still_resend_config.get("spacing_ms", 100.0))
-        tail_s = float(self.still_resend_config.get("tail_s", 0.0))
-        tail_hz = int(self.still_resend_config.get("tail_hz", 0))
+        burst = int(self.still_resend_config.get("burst"))
+        spacing_ms = float(self.still_resend_config.get("spacing_ms"))
+        tail_s = float(self.still_resend_config.get("tail_s"))
+        tail_hz = int(self.still_resend_config.get("tail_hz"))
         
         addr = (self.target.host, self.target.port)
         seq = self.last_frame_seq or self.seq

@@ -36,7 +36,7 @@ async def main():
 
     try:
         # Set Windows timer resolution for better timing accuracy
-        if config.get("net.win_timer_res", True):
+        if config.get("net.win_timer_res"):
             set_windows_timer_resolution(True)
 
         # Start WebSocket server
@@ -47,7 +47,7 @@ async def main():
         
     finally:
         # Clean up Windows timer resolution
-        if config.get("net.win_timer_res", True):
+        if config.get("net.win_timer_res"):
             set_windows_timer_resolution(False)
 
 

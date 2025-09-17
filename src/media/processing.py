@@ -16,7 +16,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
 
     # Choose resample method
     cfg = config.get("image", {}) or {}
-    method_s = str(cfg.get("method", "lanczos")).lower()
+    method_s = str(cfg.get("method")).lower()
     M = Image.Resampling
     METHOD_MAP = {
         "lanczos": M.LANCZOS,
