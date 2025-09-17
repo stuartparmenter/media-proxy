@@ -217,3 +217,12 @@ $RECYCLE.BIN/
 
 # Home Assistant add-on build artifacts
 ha-addon/build/
+
+# Test and debug files (development only)
+tests/
+*.bin
+test_*.py
+debug_*.py
+analyze_*.py
+compare_*.py
+temp_*.py
