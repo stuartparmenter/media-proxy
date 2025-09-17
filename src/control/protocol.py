@@ -4,6 +4,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import asyncio
+from .fields import ControlFields
 
 
 class ControlSession:
@@ -38,57 +39,53 @@ class ControlProtocol(ABC):
         
     async def handle_start_stream(self, session: ControlSession, params: Dict[str, Any]) -> None:
         """Handle start_stream request. Base implementation with validation."""
-        self._require_fields(params, ("out", "w", "h", "src"), "start_stream")
-        
+        ControlFields.validate_fields(params, "start")
+
         out_id = int(params["out"])
-        width = int(params["w"])
-        height = int(params["h"])
-        
-        if width <= 0 or height <= 0:
-            raise ValueError(f"start_stream requires positive w/h (got {width}x{height})")
-            
+
         # Stop existing stream on this output
         await self._stop_stream_internal(session, out_id)
-        
+
         # Delegate to implementation
         stream_task = await self._create_stream_task(session, params)
         session.active_streams[out_id] = stream_task
-        
+
         await self.send_response(session, {
-            "type": "ack", 
+            "type": "ack",
             "out": out_id,
-            "applied": self._extract_applied_params(params)
+            "applied": ControlFields.extract_applied_params(params)
         })
         
     async def handle_stop_stream(self, session: ControlSession, params: Dict[str, Any]) -> None:
         """Handle stop_stream request."""
-        self._require_fields(params, ("out",), "stop_stream")
+        ControlFields.validate_fields(params, "stop")
         out_id = int(params["out"])
-        
+
         await self._stop_stream_internal(session, out_id)
         await self.send_response(session, {"type": "ack", "out": out_id})
         
     async def handle_update_stream(self, session: ControlSession, params: Dict[str, Any]) -> None:
         """Handle update_stream request by stopping and restarting."""
-        self._require_fields(params, ("out",), "update")
+        ControlFields.validate_fields(params, "update")
         out_id = int(params["out"])
-        
+
         if out_id not in session.active_streams:
             raise ValueError(f"update for unknown out={out_id} (no active stream)")
-            
-        # Build new start_stream params
+
+        # Build new start_stream params with updatable fields
         base_params = {"type": "start_stream", "out": out_id}
-        applied = {}
-        for key in ("w", "h", "ddp_port", "src", "pace", "ema", "expand", "loop", "hw", "fmt"):
-            if key in params:
-                base_params[key] = params[key]
-                applied[key] = params[key]
-                
+        updatable_params = ControlFields.extract_updatable_params(params)
+        base_params.update(updatable_params)
+
         await self._stop_stream_internal(session, out_id)
         stream_task = await self._create_stream_task(session, base_params)
         session.active_streams[out_id] = stream_task
-        
-        await self.send_response(session, {"type": "ack", "out": out_id, "applied": applied})
+
+        await self.send_response(session, {
+            "type": "ack",
+            "out": out_id,
+            "applied": ControlFields.extract_applied_params(updatable_params)
+        })
         
     async def handle_ping(self, session: ControlSession, params: Dict[str, Any]) -> None:
         """Handle ping request."""
@@ -116,16 +113,3 @@ class ControlProtocol(ABC):
             except Exception as e:
                 print(f"[control] stream cleanup error out={out_id}: {e!r}")
                 
-    def _require_fields(self, params: Dict[str, Any], fields: tuple, operation: str) -> None:
-        """Validate required fields are present."""
-        missing = [f for f in fields if f not in params]
-        if missing:
-            raise ValueError(f"{operation} requires {', '.join(fields)} (missing: {', '.join(missing)})")
-            
-    def _extract_applied_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract parameters that were applied to the stream."""
-        applied = {}
-        for key in ("src", "pace", "ema", "expand", "loop", "hw", "fmt"):
-            if key in params:
-                applied[key] = params[key]
-        return applied
