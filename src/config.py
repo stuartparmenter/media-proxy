@@ -9,7 +9,7 @@ from typing import Dict, Any
 DEFAULT_CONFIG: Dict[str, Any] = {
     "hw": {"prefer": "auto"},
     "video": {
-        "expand_mode": 1,  # 0=never, 1=auto(limited->full), 2=force
+        "expand_mode": 2,  # 0=never, 1=auto(limited->full), 2=force
         "fit": "auto-pad",  # "pad" | "cover" | "auto-pad" | "auto-cover"
         "autocrop": {
             "enabled": True,
