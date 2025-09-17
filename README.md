@@ -2,7 +2,7 @@
 
 Stream videos, GIFs, still images, and YouTube content to tiny LED/LCD displays (e.g., ESPHome devices using DDP) with smart resizing, optional color-range expansion, and packet pacing. This add-on exposes a WebSocket control API and pushes pixel data over UDP using the DDP format.
 
-> The add-on launches `src/server.py` via `ha-addon/run.py`, which reads add-on options and execs the server with `--host/--port` and an optional `--config`.
+> The add-on launches `src/run.py` via `ha-addon/run.py`, which reads add-on options and execs the server with `--host/--port` and an optional `--config`.
 
 ---
 
@@ -64,7 +64,7 @@ playback:
 
 image:
   method: lanczos       # lanczos | bicubic | bilinear | box | nearest
-  gamma_correct: true
+  gamma_correct: false
   unsharp:
     amount: 0.0
     radius: 0.6
