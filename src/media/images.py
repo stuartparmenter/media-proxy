@@ -168,8 +168,9 @@ class PilFrameIterator(FrameIterator):
         try:
             from .processing import resize_pad_to_rgb_bytes
 
-            # Determine if animated and get frame info
-            with self.img_source.open_image() as pil_img:
+            # Open image once and keep it open for the iteration
+            pil_img = self.img_source.open_image()
+            try:
                 is_animated = getattr(pil_img, 'is_animated', False)
                 n_frames = getattr(pil_img, 'n_frames', 1) if is_animated else 1
 
@@ -185,14 +186,13 @@ class PilFrameIterator(FrameIterator):
                         print(f"[gif] loaded per-frame timing: {len(frame_timings)} frames")
                         PilFrameIterator._logged_frame_timing = True
 
-            # Main iteration loop
-            while True:
-                saw_frame = False
+                # Main iteration loop
+                while True:
+                    saw_frame = False
 
-                if is_animated:
-                    # Iterate through all frames
-                    for frame_idx in range(n_frames):
-                        with self.img_source.open_image() as pil_img:
+                    if is_animated:
+                        # Iterate through all frames - reuse open PIL image
+                        for frame_idx in range(n_frames):
                             pil_img.seek(frame_idx)
                             frame_img = pil_img.convert("RGB")
                             rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
@@ -203,18 +203,20 @@ class PilFrameIterator(FrameIterator):
 
                             yield rgb888, final_delay
                             saw_frame = True
-                else:
-                    # Static image
-                    with self.img_source.open_image() as pil_img:
+                    else:
+                        # Static image
                         frame_img = pil_img.convert("RGB")
                         rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
                         yield rgb888, default_delay_ms
                         saw_frame = True
 
-                if not loop_video:
-                    break
-                if not saw_frame:
-                    raise FileNotFoundError(f"cannot decode frames: {self.src_url}")
+                    if not loop_video:
+                        break
+                    if not saw_frame:
+                        raise FileNotFoundError(f"cannot decode frames: {self.src_url}")
+            finally:
+                # Ensure PIL image is closed
+                pil_img.close()
 
         except Exception as e:
             msg = str(e).lower()
