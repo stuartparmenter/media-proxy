@@ -99,7 +99,11 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
         return _to_srgb_u8._lut[lin_u16]
 
     # Handle paletted images specially to preserve colors
+    transparency_index = None
     if is_paletted and original_palette is not None:
+        # Track transparency index if present
+        if "transparency" in img.info:
+            transparency_index = img.info["transparency"]
         # Resize the palette indices, then convert to RGB using original palette
         # This preserves the exact original colors
         palette_indices = np.asarray(img, dtype=np.uint8)
@@ -119,11 +123,37 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
         safe_indices = np.clip(indices_array, 0, max_idx)
         rgb_array = original_palette[safe_indices]
 
-        im = Image.fromarray(rgb_array.astype(np.uint8), mode='RGB')
+        # Handle transparency after palette mapping
+        if transparency_index is not None:
+            # Create alpha mask: opaque where index != transparency_index
+            alpha_mask = (indices_array != transparency_index).astype(np.uint8) * 255
+
+            # Create RGBA image with alpha channel
+            rgba_array = np.concatenate([rgb_array, alpha_mask[..., np.newaxis]], axis=-1)
+            rgba_img = Image.fromarray(rgba_array.astype(np.uint8), mode='RGBA')
+
+            # Blend with black background
+            background = Image.new("RGB", rgba_img.size, (0, 0, 0))
+            background.paste(rgba_img, mask=Image.fromarray(alpha_mask, mode='L'))
+            im = background
+        else:
+            im = Image.fromarray(rgb_array.astype(np.uint8), mode='RGB')
     else:
         # Convert to RGB early (handle "L", "LA", "RGBA", etc.)
         if img.mode != "RGB":
-            img = img.convert("RGB")
+            if img.mode in ("RGBA", "LA") or "transparency" in img.info:
+                # Handle transparency with black background
+                background = Image.new("RGB", img.size, (0, 0, 0))
+                if img.mode == "P":
+                    img = img.convert("RGBA")
+                # After conversion, img is now RGBA so use the alpha channel as mask
+                if img.mode in ("RGBA", "LA"):
+                    background.paste(img, mask=img.split()[-1])
+                else:
+                    background.paste(img)
+                img = background
+            else:
+                img = img.convert("RGB")
 
         # Compute contain size once (no resampling yet)
         src_w, src_h = img.size

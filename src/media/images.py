@@ -159,10 +159,13 @@ class PilFrameIterator(FrameIterator):
     def can_handle(cls, src_url: str) -> bool:
         """Check if this is an image file we can handle."""
         try:
-            # Quick check based on URL/path extension
-            lower_url = src_url.lower()
+            from urllib.parse import urlparse
+            # Parse URL to get path without query parameters
+            parsed = urlparse(src_url.lower())
+            path = parsed.path if parsed.path else src_url.lower()
+
             image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')
-            return any(lower_url.endswith(ext) for ext in image_extensions)
+            return any(path.endswith(ext) for ext in image_extensions)
         except Exception:
             return False
 
@@ -199,15 +202,14 @@ class PilFrameIterator(FrameIterator):
                             duration = pil_img.info.get('duration', default_delay_ms)
                             duration = max(MIN_DELAY_MS, float(duration))
 
-                            frame_img = pil_img.convert("RGB")
-                            rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
+                            # Pass frame as-is to processing function to handle transparency properly
+                            rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config)
 
                             yield rgb888, duration
                             saw_frame = True
                     else:
-                        # Static image
-                        frame_img = pil_img.convert("RGB")
-                        rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
+                        # Static image - pass as-is to handle transparency
+                        rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config)
                         yield rgb888, default_delay_ms
                         saw_frame = True
 

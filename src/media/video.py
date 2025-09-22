@@ -162,17 +162,20 @@ class PyAvFrameIterator(FrameIterator):
     def can_handle(cls, src_url: str) -> bool:
         """Check if this is a video file or stream we can handle."""
         try:
-            # Quick check based on URL/path extension or protocol
+            from urllib.parse import urlparse
+            # Parse URL to get path without query parameters
+            parsed = urlparse(src_url.lower())
+            path = parsed.path if parsed.path else src_url.lower()
             lower_url = src_url.lower()
 
             # First, check if this looks like an image that PIL should handle
             image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')
-            if any(lower_url.endswith(ext) for ext in image_extensions):
+            if any(path.endswith(ext) for ext in image_extensions):
                 return False  # Let PIL handle these
 
             # Video file extensions
             video_extensions = ('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp')
-            if any(lower_url.endswith(ext) for ext in video_extensions):
+            if any(path.endswith(ext) for ext in video_extensions):
                 return True
 
             # Streaming protocols (but be careful with HTTP images)
