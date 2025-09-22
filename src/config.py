@@ -26,6 +26,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "method": "lanczos",
         # Do resize in linear light (gamma-aware) to preserve tones
         "gamma_correct": False,
+        # Convert embedded ICC profiles to sRGB for consistent color
+        "color_correction": True,
         # Optional mild sharpen after resize (0 disables)
         "unsharp": {"amount": 0.0, "radius": 0.6, "threshold": 2}
     },

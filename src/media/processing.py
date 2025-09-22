@@ -1,10 +1,83 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
+import io
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageCms
 from typing import Tuple
 from ..config import Config
+
+
+def convert_to_srgb(img: Image.Image, config: Config = None) -> Image.Image:
+    """Convert image from embedded ICC profile to sRGB if needed.
+
+    Args:
+        img: PIL Image with potential ICC profile
+        config: Configuration object for color correction settings
+
+    Returns:
+        Image converted to sRGB color space
+    """
+    if config is None:
+        config = Config()
+
+    # Check if color correction is enabled
+    cfg = config.get("image", {}) or {}
+    if not cfg.get("color_correction", True):
+        return img
+
+    try:
+        # Check if image has an ICC profile
+        if 'icc_profile' not in img.info:
+            return img
+
+        # Get the embedded ICC profile
+        icc_profile = img.info['icc_profile']
+        if not icc_profile:
+            return img
+
+        # Create profile objects
+        source_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_profile))
+        srgb_profile = ImageCms.createProfile('sRGB')
+
+        # Check if source is already sRGB (avoid unnecessary conversion)
+        try:
+            source_colorspace = ImageCms.getProfileName(source_profile).lower()
+            if 'srgb' in source_colorspace:
+                return img
+        except:
+            pass
+
+        # Get profile name for logging
+        try:
+            profile_name = ImageCms.getProfileName(source_profile)
+        except:
+            profile_name = "unknown"
+
+        print(f"[color] Converting {profile_name.strip()} -> sRGB")
+
+        # Create transformation from source to sRGB
+        transform = ImageCms.buildTransformFromOpenProfiles(
+            source_profile,
+            srgb_profile,
+            img.mode,
+            img.mode,
+            renderingIntent=1
+        )
+
+        # Apply the transformation
+        converted_img = ImageCms.applyTransform(img, transform)
+
+        # Remove the old ICC profile
+        converted_img.info = img.info.copy()
+        if 'icc_profile' in converted_img.info:
+            del converted_img.info['icc_profile']
+
+        return converted_img
+
+    except Exception as e:
+        print(f"[color] Color conversion failed: {e}")
+        return img
 
 
 def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Config = None) -> bytes:
@@ -15,6 +88,9 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
     """
     if config is None:
         config = Config()
+
+    # Convert ICC profile to sRGB if needed
+    img = convert_to_srgb(img, config)
 
     w, h = size
 

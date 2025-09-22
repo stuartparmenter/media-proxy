@@ -21,6 +21,7 @@ MIN_DELAY_MS = 10.0  # clamp very small frame delays
 
 # Image size limits
 MAX_SIZE_LIMIT = 50 * 1024 * 1024    # 50MB - reject larger images
+MEMORY_THRESHOLD = 500 * 1024        # 500KB - use BytesIO for smaller images
 
 # Normalized disposal method constants
 class DisposalMethod:
@@ -130,7 +131,30 @@ class ImageSource(ABC):
         pass
 
 
-# Removed BytesIOSource - using temp files for all images for simplicity
+class BytesIOSource(ImageSource):
+    """Image source that uses in-memory BytesIO for small images."""
+
+    def __init__(self, data: bytes):
+        self.data = data
+        self._cleaned = False
+        # Register for cleanup tracking
+        _active_image_sources.add(self)
+
+    def open_image(self) -> Image.Image:
+        if self._cleaned:
+            raise RuntimeError("Attempted to use cleaned up ImageSource")
+        return Image.open(BytesIO(self.data))
+
+    def cleanup(self) -> None:
+        if self._cleaned:
+            return
+        self.data = None
+        self._cleaned = True
+        # Remove from tracking (weakref will handle this automatically too)
+        try:
+            _active_image_sources.discard(self)
+        except:
+            pass
 
 
 class TempFileSource(ImageSource):
@@ -167,7 +191,7 @@ class TempFileSource(ImageSource):
 
 
 def _create_image_source(src_url: str) -> ImageSource:
-    """Create temp file image source (simplified approach)."""
+    """Create image source - BytesIO for small images, temp file for large ones."""
     try:
         if is_http_url(src_url):
             try:
@@ -201,11 +225,14 @@ def _create_image_source(src_url: str) -> ImageSource:
         if actual_size > MAX_SIZE_LIMIT:
             raise ValueError(f"Image too large: {_format_size_mb(actual_size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
 
-        # Always use temp file - let OS/Docker handle optimization (tmpfs, caching, etc.)
+        # Use BytesIO for small images, temp file for large ones
+        if actual_size <= MEMORY_THRESHOLD:
+            return BytesIOSource(data)
+
+        # Use temp file for larger images
         with tempfile.NamedTemporaryFile(suffix='.img', delete=False) as temp_file:
             temp_file.write(data)
             temp_path = temp_file.name
-
         return TempFileSource(temp_path)
 
     except Exception as e:
@@ -254,6 +281,27 @@ class PilFrameIterator(FrameIterator):
                 is_animated = getattr(pil_img, 'is_animated', False)
                 n_frames = getattr(pil_img, 'n_frames', 1) if is_animated else 1
 
+                # Extract palette and background color once for animated images (same for all frames)
+                background_color = None
+                global_palette = None
+                bg_rgb = (0, 0, 0)  # Default black background for LEDs
+
+                if is_animated:
+                    background_color = pil_img.info.get('background', 0)  # Background color index
+                    if hasattr(pil_img, 'palette') and pil_img.palette:
+                        try:
+                            palette_data = pil_img.palette.getdata()[1]
+                            if len(palette_data) >= 3:
+                                palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)
+                                if len(palette_rgb) % 3 == 0:
+                                    global_palette = palette_rgb.reshape(-1, 3)
+                        except:
+                            pass
+
+                    # Determine background color (default to black for LEDs)
+                    if global_palette is not None and background_color < len(global_palette):
+                        bg_rgb = tuple(global_palette[background_color])
+
                 # Main iteration loop
                 while True:
                     saw_frame = False
@@ -262,25 +310,6 @@ class PilFrameIterator(FrameIterator):
                         # For animated GIFs, we need to handle frame compositing properly
                         canvas = None  # Current composite state
                         previous_canvas = None  # For disposal method 3
-                        background_color = pil_img.info.get('background', 0)  # Background color index
-
-                        # Get global palette for background color
-                        global_palette = None
-                        if hasattr(pil_img, 'palette') and pil_img.palette:
-                            try:
-                                palette_data = pil_img.palette.getdata()[1]
-                                if len(palette_data) >= 3:
-                                    palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)
-                                    if len(palette_rgb) % 3 == 0:
-                                        global_palette = palette_rgb.reshape(-1, 3)
-                            except:
-                                pass
-
-                        # Determine background color (default to black for LEDs)
-                        if global_palette is not None and background_color < len(global_palette):
-                            bg_rgb = tuple(global_palette[background_color])
-                        else:
-                            bg_rgb = (0, 0, 0)  # Black background for LEDs
 
                         # Iterate through all frames with proper disposal handling
                         for frame_idx in range(n_frames):

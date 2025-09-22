@@ -27,6 +27,10 @@ RUN apk add --no-cache \
       libva \
       libva-utils \
       mesa-va-gallium \
+      lcms2 \
+      libjpeg-turbo \
+      libwebp \
+      tiff \
  && if [ "$(uname -m)" = "x86_64" ] || [ "$(uname -m)" = "i386" ]; then \
       apk add --no-cache intel-media-driver; \
     fi
