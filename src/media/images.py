@@ -15,11 +15,16 @@ from abc import ABC, abstractmethod
 from ..config import Config
 from ..utils.helpers import is_http_url
 from .protocol import FrameIterator, FrameIteratorConfig
+from .processing import resize_pad_to_rgb_bytes
 
 MIN_DELAY_MS = 10.0  # clamp very small frame delays
 
 # Image size limits
 MAX_SIZE_LIMIT = 50 * 1024 * 1024    # 50MB - reject larger images
+
+def _format_size_mb(size_bytes: int) -> str:
+    """Format size in bytes as MB string."""
+    return f"{size_bytes / 1024 / 1024:.1f}MB"
 
 # Global registry for cleanup tracking
 _active_image_sources = weakref.WeakSet()
@@ -105,14 +110,14 @@ def _create_image_source(src_url: str) -> ImageSource:
                 if content_length:
                     size = int(content_length)
                     if size > MAX_SIZE_LIMIT:
-                        raise ValueError(f"Image too large: {size / 1024 / 1024:.1f}MB (max {MAX_SIZE_LIMIT / 1024 / 1024:.1f}MB)")
+                        raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
 
                 data = response.read()
         else:
             # Local file
             file_size = os.path.getsize(src_url)
             if file_size > MAX_SIZE_LIMIT:
-                raise ValueError(f"Image too large: {file_size / 1024 / 1024:.1f}MB (max {MAX_SIZE_LIMIT / 1024 / 1024:.1f}MB)")
+                raise ValueError(f"Image too large: {_format_size_mb(file_size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
 
             with open(src_url, 'rb') as f:
                 data = f.read()
@@ -120,7 +125,7 @@ def _create_image_source(src_url: str) -> ImageSource:
         # Check actual size after download
         actual_size = len(data)
         if actual_size > MAX_SIZE_LIMIT:
-            raise ValueError(f"Image too large: {actual_size / 1024 / 1024:.1f}MB (max {MAX_SIZE_LIMIT / 1024 / 1024:.1f}MB)")
+            raise ValueError(f"Image too large: {_format_size_mb(actual_size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
 
         # Always use temp file - let OS/Docker handle optimization (tmpfs, caching, etc.)
         with tempfile.NamedTemporaryFile(suffix='.img', delete=False) as temp_file:
@@ -160,48 +165,36 @@ class PilFrameIterator(FrameIterator):
         loop_video = self.config.loop_video
 
         # Default fallback delay (for images without timing info)
-        default_delay_ms = 1000.0 / 10.0
+        default_delay_ms = 100.0  # 10 FPS
 
         # Create optimized image source (memory vs temp file)
         self.img_source = _create_image_source(self.src_url)
 
         try:
-            from .processing import resize_pad_to_rgb_bytes
-
             # Open image once and keep it open for the iteration
             pil_img = self.img_source.open_image()
             try:
                 is_animated = getattr(pil_img, 'is_animated', False)
                 n_frames = getattr(pil_img, 'n_frames', 1) if is_animated else 1
 
-                # Pre-load frame timings for animated GIFs
-                frame_timings = []
-                if is_animated:
-                    for i in range(n_frames):
-                        pil_img.seek(i)
-                        duration = pil_img.info.get('duration', default_delay_ms)
-                        frame_timings.append(max(MIN_DELAY_MS, float(duration)))
-
-                    if frame_timings and not hasattr(PilFrameIterator, '_logged_frame_timing'):
-                        print(f"[gif] loaded per-frame timing: {len(frame_timings)} frames")
-                        PilFrameIterator._logged_frame_timing = True
-
                 # Main iteration loop
                 while True:
                     saw_frame = False
 
                     if is_animated:
-                        # Iterate through all frames - reuse open PIL image
+                        # Iterate through all frames - collect timing during iteration
                         for frame_idx in range(n_frames):
                             pil_img.seek(frame_idx)
+                            pil_img.load()  # REQUIRED: Pillow only extracts WebP duration after load(), not seek()
+
+                            # Get timing info from current frame
+                            duration = pil_img.info.get('duration', default_delay_ms)
+                            duration = max(MIN_DELAY_MS, float(duration))
+
                             frame_img = pil_img.convert("RGB")
                             rgb888 = resize_pad_to_rgb_bytes(frame_img, size, config)
 
-                            # Use pre-loaded timing
-                            delay_ms = frame_timings[frame_idx] if frame_timings else default_delay_ms
-                            final_delay = max(MIN_DELAY_MS, float(delay_ms))
-
-                            yield rgb888, final_delay
+                            yield rgb888, duration
                             saw_frame = True
                     else:
                         # Static image
