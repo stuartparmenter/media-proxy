@@ -228,6 +228,10 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
             # Native cadence mode
             await _run_native_streaming(output, size, src, opts, hw_prefer)
 
+    except Exception as e:
+        print(f"[stream] {target.output_id} error: {e}")
+        # Let the error propagate but ensure cleanup happens
+        raise
     finally:
         await output.stop()
         # Clean up any temp files from image caching

@@ -104,15 +104,23 @@ def _create_image_source(src_url: str) -> ImageSource:
     """Create temp file image source (simplified approach)."""
     try:
         if is_http_url(src_url):
-            with urllib.request.urlopen(src_url) as response:
-                # Check content length if available
-                content_length = response.headers.get('Content-Length')
-                if content_length:
-                    size = int(content_length)
-                    if size > MAX_SIZE_LIMIT:
-                        raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
+            try:
+                # Create request with proper headers to avoid 403 errors
+                req = urllib.request.Request(src_url)
+                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36')
+                with urllib.request.urlopen(req) as response:
+                    # Check content length if available
+                    content_length = response.headers.get('Content-Length')
+                    if content_length:
+                        size = int(content_length)
+                        if size > MAX_SIZE_LIMIT:
+                            raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
 
-                data = response.read()
+                    data = response.read()
+            except urllib.error.HTTPError as e:
+                raise FileNotFoundError(f"HTTP error {e.code}: {e.reason} for {src_url}") from e
+            except urllib.error.URLError as e:
+                raise FileNotFoundError(f"URL error: {e.reason} for {src_url}") from e
         else:
             # Local file
             file_size = os.path.getsize(src_url)
