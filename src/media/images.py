@@ -22,9 +22,75 @@ MIN_DELAY_MS = 10.0  # clamp very small frame delays
 # Image size limits
 MAX_SIZE_LIMIT = 50 * 1024 * 1024    # 50MB - reject larger images
 
+# Normalized disposal method constants
+class DisposalMethod:
+    """Normalized disposal methods for animated images."""
+    NONE = 0        # Do not dispose - leave frame for next to composite over
+    BACKGROUND = 1  # Restore to background color before next frame
+    PREVIOUS = 2    # Restore to previous frame state before next frame
+
+# Normalized blend mode constants
+class BlendMode:
+    """Normalized blend modes for animated images."""
+    OVER = 0        # Alpha blend over existing pixels (default)
+    SOURCE = 1      # Replace pixels entirely (no alpha blending)
+
 def _format_size_mb(size_bytes: int) -> str:
     """Format size in bytes as MB string."""
     return f"{size_bytes / 1024 / 1024:.1f}MB"
+
+
+def _get_normalized_disposal_method(pil_img: Image.Image) -> int:
+    """Get normalized disposal method from PIL image.
+
+    Returns DisposalMethod constant regardless of format (GIF/APNG/WebP).
+    """
+    # Try GIF format first (has disposal_method attribute)
+    if hasattr(pil_img, 'disposal_method'):
+        gif_disposal = pil_img.disposal_method
+        # GIF: 0/1=none, 2=background, 3=previous → normalize to 0,1,2
+        if gif_disposal in (0, 1):
+            return DisposalMethod.NONE
+        elif gif_disposal == 2:
+            return DisposalMethod.BACKGROUND
+        elif gif_disposal == 3:
+            return DisposalMethod.PREVIOUS
+        else:
+            return DisposalMethod.NONE  # fallback
+
+    # Try APNG format (uses info['disposal'])
+    elif 'disposal' in pil_img.info:
+        apng_disposal = pil_img.info['disposal']
+        # APNG: 0=none, 1=background, 2=previous → already normalized
+        if apng_disposal == 0:
+            return DisposalMethod.NONE
+        elif apng_disposal == 1:
+            return DisposalMethod.BACKGROUND
+        elif apng_disposal == 2:
+            return DisposalMethod.PREVIOUS
+        else:
+            return DisposalMethod.NONE  # fallback
+
+    # Default for WebP or unknown formats
+    return DisposalMethod.NONE
+
+
+def _get_normalized_blend_mode(pil_img: Image.Image) -> int:
+    """Get normalized blend mode from PIL image.
+
+    Returns BlendMode constant regardless of format.
+    """
+    # Try APNG format (has blend_op attribute)
+    if hasattr(pil_img, 'blend_op'):
+        apng_blend = pil_img.blend_op
+        # APNG: 0=source, 1=over → reverse to match our constants
+        if apng_blend == 0:
+            return BlendMode.SOURCE
+        else:
+            return BlendMode.OVER
+
+    # Default for GIF, WebP, or unknown formats (always alpha blend)
+    return BlendMode.OVER
 
 # Global registry for cleanup tracking
 _active_image_sources = weakref.WeakSet()
@@ -170,7 +236,7 @@ class PilFrameIterator(FrameIterator):
             return False
 
     def __iter__(self) -> Iterator[Tuple[bytes, float]]:
-        """Iterate frames from static images or animated GIFs."""
+        """Iterate frames from static images or animated GIFs with proper disposal handling."""
         config = Config()
         size = self.config.size
         loop_video = self.config.loop_video
@@ -193,7 +259,30 @@ class PilFrameIterator(FrameIterator):
                     saw_frame = False
 
                     if is_animated:
-                        # Iterate through all frames - collect timing during iteration
+                        # For animated GIFs, we need to handle frame compositing properly
+                        canvas = None  # Current composite state
+                        previous_canvas = None  # For disposal method 3
+                        background_color = pil_img.info.get('background', 0)  # Background color index
+
+                        # Get global palette for background color
+                        global_palette = None
+                        if hasattr(pil_img, 'palette') and pil_img.palette:
+                            try:
+                                palette_data = pil_img.palette.getdata()[1]
+                                if len(palette_data) >= 3:
+                                    palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)
+                                    if len(palette_rgb) % 3 == 0:
+                                        global_palette = palette_rgb.reshape(-1, 3)
+                            except:
+                                pass
+
+                        # Determine background color (default to black for LEDs)
+                        if global_palette is not None and background_color < len(global_palette):
+                            bg_rgb = tuple(global_palette[background_color])
+                        else:
+                            bg_rgb = (0, 0, 0)  # Black background for LEDs
+
+                        # Iterate through all frames with proper disposal handling
                         for frame_idx in range(n_frames):
                             pil_img.seek(frame_idx)
                             pil_img.load()  # REQUIRED: Pillow only extracts WebP duration after load(), not seek()
@@ -202,11 +291,43 @@ class PilFrameIterator(FrameIterator):
                             duration = pil_img.info.get('duration', default_delay_ms)
                             duration = max(MIN_DELAY_MS, float(duration))
 
-                            # Pass frame as-is to processing function to handle transparency properly
-                            rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config)
+                            # Get normalized disposal method and blend mode
+                            disposal_method = _get_normalized_disposal_method(pil_img)
+                            blend_mode = _get_normalized_blend_mode(pil_img)
 
+                            # Initialize canvas on first frame
+                            if canvas is None:
+                                canvas = Image.new("RGBA", pil_img.size, bg_rgb + (255,))
+
+                            # Save current canvas state before applying frame (needed for PREVIOUS disposal)
+                            if disposal_method == DisposalMethod.PREVIOUS:
+                                previous_canvas = canvas.copy()
+
+                            # Get current frame as RGBA
+                            frame = pil_img.convert("RGBA")
+
+                            # Composite current frame onto canvas based on blend mode
+                            if blend_mode == BlendMode.SOURCE:
+                                # SOURCE mode: replace pixels entirely (no alpha blending)
+                                canvas.paste(frame, (0, 0))
+                            else:
+                                # OVER mode: alpha blend over existing pixels
+                                canvas.paste(frame, (0, 0), frame)
+
+                            # Process the composite canvas for output
+                            rgb888 = resize_pad_to_rgb_bytes(canvas, size, config)
                             yield rgb888, duration
                             saw_frame = True
+
+                            # Apply disposal method for next frame
+                            if disposal_method == DisposalMethod.BACKGROUND:
+                                # Restore to background color
+                                canvas = Image.new("RGBA", pil_img.size, bg_rgb + (255,))
+                            elif disposal_method == DisposalMethod.PREVIOUS:
+                                # Restore to previous frame state
+                                if previous_canvas is not None:
+                                    canvas = previous_canvas.copy()
+                            # For DisposalMethod.NONE: do nothing (leave canvas as-is)
                     else:
                         # Static image - pass as-is to handle transparency
                         rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config)
