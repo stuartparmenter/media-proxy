@@ -238,12 +238,13 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
         cleanup_active_image_sources()
 
 
-async def _run_native_streaming(output, size: Tuple[int, int], src: str, 
+async def _run_native_streaming(output, size: Tuple[int, int], src: str,
                                opts: Dict[str, Any], hw_prefer: str):
     """Run streaming at native source cadence."""
     frames_emitted = 0
     seq = 0
-    
+    next_frame_time = asyncio.get_event_loop().time()
+
     async for rgb888, delay_ms in iter_frames_async(
         src, size,
         loop_video=opts["loop"],
@@ -260,15 +261,23 @@ async def _run_native_streaming(output, size: Tuple[int, int], src: str,
             is_still=(not opts["loop"] and frames_emitted == 0),
             is_last_frame=(not opts["loop"] and frames_emitted == 0)
         )
-        
+
         # Send frame
         await output.send_frame(rgb888, metadata)
-        
+
         frames_emitted += 1
         seq = (seq + 1) & 0xFF
-        
-        # Wait for next frame
-        await asyncio.sleep(max(0.01, delay_ms / 1000.0))
+
+        # Precise timing: wait until next scheduled frame time
+        next_frame_time += max(0.01, delay_ms / 1000.0)
+        current_time = asyncio.get_event_loop().time()
+        sleep_duration = next_frame_time - current_time
+
+        # If we're more than 100ms behind, reset timing to prevent runaway catch-up
+        if sleep_duration < -0.1:
+            next_frame_time = current_time
+        elif sleep_duration > 0:
+            await asyncio.sleep(sleep_duration)
 
 
 async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
