@@ -6,9 +6,13 @@ import os
 from typing import Dict, Any, AsyncIterator, Tuple, Optional
 from urllib.parse import unquote
 
+import urllib.error
+import av.error
+import yt_dlp
 from .config import Config
+
 from .control.fields import ControlFields
-from .media.sources import resolve_media_source, StreamUrlExpiredError
+from .media.sources import resolve_media_source, MediaUnavailableError
 from .media.protocol import FrameIteratorFactory, FrameIteratorConfig
 from .media.images import cleanup_active_image_sources
 from .output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata
@@ -23,7 +27,7 @@ from .utils.hardware import choose_decode_preference
 # Removed _get_gif_fps_from_pyav - PIL handles GIF timing directly
 
 
-async def iter_frames_async(
+async def stream_frames(
     src: str,
     size: Tuple[int, int],
     loop_video: bool = True,
@@ -32,7 +36,7 @@ async def iter_frames_async(
     hw_prefer: str = None
 ) -> AsyncIterator[Tuple[bytes, float]]:
     """
-    Async version of iter_frames using the new protocol-based approach.
+    Stream frames from a media source with automatic retry and error recovery.
     """
     src_url = unquote(src)
     original_src = src_url
@@ -43,10 +47,25 @@ async def iter_frames_async(
         try:
             # For YouTube URLs, resolve to get actual stream URL and options
             if is_youtube_url(src_url):
-                source = await resolve_media_source(src_url)
-                # Update the PyAV iterator's real_src_url for YouTube resolution
-                resolved_url = source.resolved_url
-                # Note: We'll need to pass these options to the iterator somehow
+                try:
+                    source = await resolve_media_source(src_url)
+                    resolved_url = source.resolved_url
+                    # Check if resolution actually succeeded (resolved URL should be different)
+                    if resolved_url == src_url:
+                        print(f"[retry] YouTube URL resolution failed on attempt {retry_count + 1}, will retry on PyAV error")
+                except Exception as e:
+                    if isinstance(e, yt_dlp.DownloadError):
+                        # YouTube format unavailable - trigger retry immediately
+                        print(f"[retry] YouTube DownloadError detected: {e}")
+                        retry_count += 1
+                        if retry_count > max_retries:
+                            raise MediaUnavailableError(f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e) from e
+                        print(f"[retry] YouTube DownloadError (attempt {retry_count}/{max_retries}), re-resolving...")
+                        await asyncio.sleep(0.5)
+                        continue
+                    else:
+                        # Other exceptions during URL resolution - re-raise
+                        raise
             else:
                 resolved_url = src_url
 
@@ -78,25 +97,35 @@ async def iter_frames_async(
             if not loop_video:
                 break
 
-        except StreamUrlExpiredError as e:
-            # URL expired, try to re-resolve
-            if not is_youtube_url(original_src):
-                # Non-YouTube URLs can't be re-resolved
-                raise RuntimeError(f"Non-YouTube URL failed and cannot be re-resolved: {e}") from e
 
-            retry_count += 1
-            if retry_count > max_retries:
-                raise RuntimeError(f"Max retries ({max_retries}) exceeded for YouTube URL resolution") from e
-
-            print(f"[retry] YouTube URL expired (attempt {retry_count}/{max_retries}), re-resolving...")
-            await asyncio.sleep(0.5)  # Brief delay before retry
-            continue
-
+        except urllib.error.HTTPError as e:
+            # HTTP errors from images.py - convert to MediaUnavailableError for consistent handling
+            raise MediaUnavailableError(f"HTTP {e.code}: {e.reason}", original_src, e) from e
+        except urllib.error.URLError as e:
+            # Network errors from images.py - convert to MediaUnavailableError for consistent handling
+            raise MediaUnavailableError(f"Network error: {e.reason}", original_src, e) from e
+        except (av.error.HTTPError, av.error.HTTPClientError, av.error.HTTPServerError, av.error.InvalidDataError, av.error.ValueError) as e:
+            # PyAV errors from video.py
+            if is_youtube_url(original_src):
+                # For YouTube URLs, these errors likely mean URL expiration or failed resolution - trigger retry
+                print(f"[retry] YouTube error detected: {e}")
+                retry_count += 1
+                if retry_count > max_retries:
+                    raise MediaUnavailableError(f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e) from e
+                print(f"[retry] YouTube URL issue (attempt {retry_count}/{max_retries}), re-resolving...")
+                await asyncio.sleep(0.5)
+                continue
+            else:
+                # Non-YouTube errors - convert to MediaUnavailableError
+                raise MediaUnavailableError(f"Media error: {e}", original_src, e) from e
+        except FileNotFoundError as e:
+            # File not found - re-raise with original source context
+            raise FileNotFoundError(f"cannot open source: {original_src}") from e
+        except RuntimeError as e:
+            # RuntimeErrors are not retryable
+            raise
         except Exception as e:
             # Other errors are not retryable
-            msg = str(e).lower()
-            if isinstance(e, FileNotFoundError) or "no such file" in msg or "not found" in msg:
-                raise FileNotFoundError(f"cannot open source: {original_src}") from e
             raise RuntimeError(f"Frame iteration error: {e}") from e
 
         if not loop_video:
@@ -150,11 +179,7 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
     if "fmt" not in opts:
         opts["fmt"] = normalize_pixel_format("rgb888")
 
-    # Validate local file exists
-    src_url = unquote(src)
-    local_path = resolve_local_path(src_url)
-    if local_path is not None and not os.path.exists(local_path):
-        raise FileNotFoundError(f"no such file: {local_path}")
+    # Note: Local file validation is handled during frame iteration
 
     print(f"* start_stream {session.client_ip} dev={session.device_id} out={output_id} "
           f"size={width}x{height} ddp_port={ddp_port} src={src} "
@@ -228,10 +253,18 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
             # Native cadence mode
             await _run_native_streaming(output, size, src, opts, hw_prefer)
 
+    except MediaUnavailableError as e:
+        # Media source unavailable (HTTP/network errors) - stop this stream task
+        print(f"[stream] {target.output_id} media unavailable: {e}")
+        return
+    except FileNotFoundError as e:
+        # Actual file not found - stop this stream task
+        print(f"[stream] {target.output_id} file not found: {e}")
+        return
     except Exception as e:
-        print(f"[stream] {target.output_id} error: {e}")
-        # Let the error propagate but ensure cleanup happens
-        raise
+        # Technical errors (codec issues, etc.) - stop this stream task
+        print(f"[stream] {target.output_id} technical error: {e}")
+        return
     finally:
         await output.stop()
         # Clean up any temp files from image caching
@@ -245,7 +278,7 @@ async def _run_native_streaming(output, size: Tuple[int, int], src: str,
     seq = 0
     next_frame_time = asyncio.get_event_loop().time()
 
-    async for rgb888, delay_ms in iter_frames_async(
+    async for rgb888, delay_ms in stream_frames(
         src, size,
         loop_video=opts["loop"],
         expand_mode=opts["expand_mode"],
@@ -280,6 +313,7 @@ async def _run_native_streaming(output, size: Tuple[int, int], src: str,
             await asyncio.sleep(sleep_duration)
 
 
+
 async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
                               opts: Dict[str, Any], hw_prefer: str):
     """Run streaming with fixed pacing (producer + sampler pattern)."""
@@ -294,7 +328,7 @@ async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
     
     # Producer task
     async def producer():
-        async for rgb888, delay_ms in iter_frames_async(
+        async for rgb888, delay_ms in stream_frames(
             src, size,
             loop_video=opts["loop"],
             expand_mode=opts["expand_mode"],
@@ -302,7 +336,7 @@ async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
         ):
             async with latest_lock:
                 latest_frame["data"] = rgb888
-            
+
             # Respect source timing for producer
             await asyncio.sleep(max(0.01, delay_ms / 1000.0))
     

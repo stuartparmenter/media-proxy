@@ -9,7 +9,6 @@ from av.filter import Graph as AvFilterGraph
 
 from ..config import Config
 from ..utils.hardware import pick_hw_backend
-from .sources import StreamUrlExpiredError
 from .protocol import FrameIterator, FrameIteratorConfig
 
 MIN_DELAY_MS = 10.0
@@ -208,9 +207,9 @@ class PyAvFrameIterator(FrameIterator):
         http_opts = {}
 
         if is_youtube_url(self.src_url) and self.real_src_url == self.src_url:
-            # If real_src_url wasn't updated, we can't resolve here in sync context
-            # This should be handled at the streaming layer
-            raise RuntimeError(f"YouTube URL resolution not handled for: {self.src_url}")
+            # If real_src_url wasn't updated, resolution may have failed
+            # Try to proceed with original URL - if it fails, we'll get HTTP errors
+            print(f"[video] YouTube URL resolution may have failed, trying original URL: {self.src_url}")
 
         # Implement the PyAV iteration directly in the protocol class
         config = Config()
@@ -461,16 +460,19 @@ class PyAvFrameIterator(FrameIterator):
 
             container.close()
 
+        except (av.error.HTTPError, av.error.HTTPClientError, av.error.HTTPServerError) as e:
+            # HTTP errors - re-raise for upstream handling (streaming layer will decide if retry needed)
+            raise
+        except FileNotFoundError as e:
+            # File not found - re-raise with clearer message
+            raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
         except Exception as e:
+            # Check for file-not-found-like errors in the message
             msg = str(e).lower()
-            if isinstance(e, FileNotFoundError) or "no such file" in msg or "not found" in msg:
+            if "no such file" in msg or "not found" in msg:
                 raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
 
-            # For YouTube URLs, any exception during playback could indicate URL expiration
-            if is_youtube_url(self.src_url):
-                print(f"[retry] YouTube playback failed, suggesting re-resolution: {e!r}")
-                raise StreamUrlExpiredError(f"YouTube stream failed: {e}") from e
-
+            # Re-raise all other errors for upstream handling
             raise RuntimeError(f"av error: {e}") from e
 
     def cleanup(self) -> None:

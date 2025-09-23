@@ -207,10 +207,9 @@ def _create_image_source(src_url: str) -> ImageSource:
                             raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
 
                     data = response.read()
-            except urllib.error.HTTPError as e:
-                raise FileNotFoundError(f"HTTP error {e.code}: {e.reason} for {src_url}") from e
-            except urllib.error.URLError as e:
-                raise FileNotFoundError(f"URL error: {e.reason} for {src_url}") from e
+            except (urllib.error.HTTPError, urllib.error.URLError):
+                # Re-raise HTTP/network errors for upstream handling
+                raise
         else:
             # Local file
             file_size = os.path.getsize(src_url)
@@ -235,6 +234,9 @@ def _create_image_source(src_url: str) -> ImageSource:
             temp_path = temp_file.name
         return TempFileSource(temp_path)
 
+    except (urllib.error.HTTPError, urllib.error.URLError, FileNotFoundError):
+        # Re-raise HTTP/network errors and file not found for upstream handling
+        raise
     except Exception as e:
         raise RuntimeError(f"Failed to create image source: {e}") from e
 

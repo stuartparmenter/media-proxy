@@ -5,12 +5,18 @@ import asyncio
 from typing import Dict, Optional, Tuple
 from urllib.parse import unquote
 
+import yt_dlp
+
 from ..utils.helpers import is_youtube_url, headers_dict_to_ffmpeg_opt
 
 
-class StreamUrlExpiredError(Exception):
-    """Raised when a YouTube stream URL has expired and needs re-resolution."""
-    pass
+
+class MediaUnavailableError(Exception):
+    """Raised when a media source is temporarily unavailable (HTTP errors, network issues, etc.)."""
+    def __init__(self, message: str, url: str, original_error: Exception = None):
+        super().__init__(message)
+        self.url = url
+        self.original_error = original_error
 
 
 async def resolve_stream_url_async(src_url: str) -> Tuple[str, Dict[str, str]]:
@@ -23,16 +29,17 @@ async def resolve_stream_url_async(src_url: str) -> Tuple[str, Dict[str, str]]:
     if not is_youtube_url(src_url):
         return src_url, {}
 
-    # Prefer compact, HTTP progressive when possible; fall back to HLS/DASH
+    # Accept any available format - FFmpeg can process almost anything
+    # Prefer video-only streams up to 1080p, fallback to combined streams
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "extract_flat": False,
         "format": (
-            "best[protocol^=http][vcodec!=none][height<=720]/"
-            "best[protocol*=m3u8][vcodec!=none][height<=720]/"
-            "bv*[height<=720]/best"
+            "bv[height<=720][vcodec!=none]/"
+            "best[height<=720][vcodec!=none]/"
+            "bv[vcodec!=none]/best[vcodec!=none]"
         ),
     }
 
@@ -40,7 +47,6 @@ async def resolve_stream_url_async(src_url: str) -> Tuple[str, Dict[str, str]]:
     loop = asyncio.get_event_loop()
     
     def _extract_info():
-        import yt_dlp  # type: ignore
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(src_url, download=False)
@@ -66,8 +72,14 @@ async def resolve_stream_url_async(src_url: str) -> Tuple[str, Dict[str, str]]:
         # Run in thread pool to avoid blocking the event loop
         return await loop.run_in_executor(None, _extract_info)
     except Exception as e:
-        print(f"[warn] YouTube URL resolution failed for {src_url}: {e!r}")
-        return src_url, {}
+        if isinstance(e, yt_dlp.DownloadError):
+            # Re-raise DownloadError for proper handling upstream
+            print(f"[warn] YouTube URL resolution failed for {src_url}: {e!r}")
+            raise
+        else:
+            # Other exceptions - log and return original URL
+            print(f"[warn] YouTube URL resolution failed for {src_url}: {e!r}")
+            return src_url, {}
 
 
 class MediaSource:
