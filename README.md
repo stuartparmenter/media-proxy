@@ -51,7 +51,7 @@ hw:
 
 video:
   expand_mode: 1        # 0=never, 1=auto(limited->full), 2=force
-  fit: auto-pad         # cover | pad | auto-pad | auto-cover
+  fit: pad              # cover | pad
   autocrop:
     enabled: true
     probe_frames: 8

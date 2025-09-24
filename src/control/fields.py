@@ -57,6 +57,9 @@ class ControlFields:
     FORMAT = FieldDef("fmt", FieldType.STRING, set(),
                       "Pixel format preference",
                       lambda x: str(x) in ("rgb888", "rgb565", "rgb565le", "rgb565be"))
+    FIT = FieldDef("fit", FieldType.STRING, set(),
+                   "Video/image fit mode",
+                   lambda x: str(x) in ("pad", "cover"))
 
     # Control fields
     TIMESTAMP = FieldDef("t", FieldType.INTEGER, set(),
@@ -70,7 +73,7 @@ class ControlFields:
     ALL_FIELDS = {
         "out": OUT, "w": WIDTH, "h": HEIGHT, "src": SOURCE,
         "ddp_port": DDP_PORT, "pace": PACE, "ema": EMA,
-        "expand": EXPAND, "loop": LOOP, "hw": HARDWARE, "fmt": FORMAT,
+        "expand": EXPAND, "loop": LOOP, "hw": HARDWARE, "fmt": FORMAT, "fit": FIT,
         "t": TIMESTAMP, "type": TYPE, "device_id": DEVICE_ID
     }
 
@@ -80,8 +83,8 @@ class ControlFields:
     REQUIRED_FOR_UPDATE = {"out"}
 
     # Fields that can be updated/applied
-    UPDATABLE_FIELDS = {"w", "h", "ddp_port", "src", "pace", "ema", "expand", "loop", "hw", "fmt"}
-    APPLIED_FIELDS = {"src", "pace", "ema", "expand", "loop", "hw", "fmt"}
+    UPDATABLE_FIELDS = {"w", "h", "ddp_port", "src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit"}
+    APPLIED_FIELDS = {"src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit"}
 
     @classmethod
     def validate_fields(cls, params: Dict[str, Any], operation: str) -> None:
@@ -139,6 +142,9 @@ if __name__ == "__main__":
         ({"out": 1, "fmt": "invalid"}, "Invalid format value (should fail)"),
         ({"out": 1, "hw": "cuda"}, "Valid hardware value"),
         ({"out": 1, "hw": "invalid"}, "Invalid hardware value (should fail)"),
+        ({"out": 1, "fit": "cover"}, "Valid fit value"),
+        ({"out": 1, "fit": "pad"}, "Valid pad fit value"),
+        ({"out": 1, "fit": "invalid"}, "Invalid fit value (should fail)"),
     ]
 
     for params, desc in test_cases:
@@ -148,7 +154,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"  {desc}: FAIL ({e})")
 
-    applied = ControlFields.extract_applied_params({"src": "test.mp4", "pace": True, "out": 1})
+    applied = ControlFields.extract_applied_params({"src": "test.mp4", "pace": True, "fit": "cover", "out": 1})
     print(f"Applied params extraction: {applied}")
 
     print("Fields module validation complete")

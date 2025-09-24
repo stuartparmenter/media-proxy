@@ -13,6 +13,7 @@ class FrameIteratorConfig:
     loop_video: bool = False
     expand_mode: int = 0  # 0=auto, 1=auto_to_pc, 2=tv_to_pc
     hw_prefer: Optional[str] = None  # Hardware acceleration preference
+    fit_mode: Optional[str] = None  # "pad" | "cover"
 
 
 class FrameIterator(ABC):

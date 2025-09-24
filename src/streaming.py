@@ -33,7 +33,8 @@ async def stream_frames(
     loop_video: bool = True,
     *,
     expand_mode: int,
-    hw_prefer: str = None
+    hw_prefer: str = None,
+    fit_mode: str = None
 ) -> AsyncIterator[Tuple[bytes, float]]:
     """
     Stream frames from a media source with automatic retry and error recovery.
@@ -74,7 +75,8 @@ async def stream_frames(
                 size=size,
                 loop_video=loop_video,
                 expand_mode=expand_mode,
-                hw_prefer=hw_prefer
+                hw_prefer=hw_prefer,
+                fit_mode=fit_mode
             )
 
             # Use the factory to create the appropriate iterator
@@ -164,6 +166,8 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
             opts["ema_alpha"] = max(0.0, min(float(value), 1.0)) if value is not None else 0.0
         elif field_name == "fmt":
             opts["fmt"] = normalize_pixel_format(str(value)) if value is not None else "rgb888"
+        elif field_name == "fit":
+            opts["fit_mode"] = str(value) if value is not None else None
 
     # Set defaults for any missing options
     if "loop" not in opts:
@@ -178,13 +182,15 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
         opts["ema_alpha"] = 0.0
     if "fmt" not in opts:
         opts["fmt"] = normalize_pixel_format("rgb888")
+    if "fit_mode" not in opts:
+        opts["fit_mode"] = config.get("video.fit")
 
     # Note: Local file validation is handled during frame iteration
 
     print(f"* start_stream {session.client_ip} dev={session.device_id} out={output_id} "
           f"size={width}x{height} ddp_port={ddp_port} src={src} "
           f"pace={opts['pace_hz']} ema={opts['ema_alpha']} expand={opts['expand_mode']} "
-          f"loop={opts['loop']} hw={opts['hw']} fmt={opts['fmt']}")
+          f"loop={opts['loop']} hw={opts['hw']} fmt={opts['fmt']} fit={opts['fit_mode']}")
 
     # Create the streaming task
     task = asyncio.create_task(
@@ -286,7 +292,8 @@ async def _run_native_streaming(output, size: Tuple[int, int], src: str,
         src, size,
         loop_video=opts["loop"],
         expand_mode=opts["expand_mode"],
-        hw_prefer=hw_prefer
+        hw_prefer=hw_prefer,
+        fit_mode=opts["fit_mode"]
     ):
         # Create frame metadata
         metadata = FrameMetadata(
@@ -336,7 +343,8 @@ async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
             src, size,
             loop_video=opts["loop"],
             expand_mode=opts["expand_mode"],
-            hw_prefer=hw_prefer
+            hw_prefer=hw_prefer,
+            fit_mode=opts["fit_mode"]
         ):
             async with latest_lock:
                 latest_frame["data"] = rgb888
