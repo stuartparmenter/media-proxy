@@ -31,6 +31,7 @@ RUN apk add --no-cache \
       libjpeg-turbo \
       libwebp \
       tiff \
+      zlib \
  && if [ "$(uname -m)" = "x86_64" ] || [ "$(uname -m)" = "i386" ]; then \
       apk add --no-cache intel-media-driver; \
     fi
@@ -42,7 +43,7 @@ COPY --from=fetch /src/src/ /app/src/
 
 # Build-only deps for wheels + create venv + pip install into venv, then clean
 RUN apk add --no-cache --virtual .build-deps \
-      build-base python3-dev linux-headers ffmpeg-dev pkgconf \
+      build-base python3-dev linux-headers ffmpeg-dev pkgconf zlib-dev \
  && python3 -m venv /opt/venv \
  && . /opt/venv/bin/activate \
  && pip install --upgrade pip \
