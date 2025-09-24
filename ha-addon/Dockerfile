@@ -3,9 +3,9 @@ ARG BUILD_FROM
 
 # ----- Stage 1: fetch just the app bits from the repo -----
 FROM alpine/git:2.45.2 AS fetch
-ARG APP_REPO=https://github.com/stuartparmenter/media-proxy
-ARG APP_REF=main
-ARG APP_SUBDIR=src
+ARG APP_REPO
+ARG APP_REF
+ARG APP_SUBDIR
 
 RUN git clone --filter=blob:none --no-checkout "${APP_REPO}" /src \
  && cd /src \

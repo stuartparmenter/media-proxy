@@ -189,7 +189,6 @@ $RECYCLE.BIN/
 *~
 
 # Config files (may contain sensitive data)
-*.yaml
 *.yml
 *.toml
 *.json
@@ -214,9 +213,6 @@ $RECYCLE.BIN/
 *.jpeg
 *.bmp
 *.tiff
-
-# Home Assistant add-on build artifacts
-ha-addon/build/
 
 # Test and debug files (development only)
 tests/
