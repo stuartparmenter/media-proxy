@@ -266,7 +266,11 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
         print(f"[stream] {target.output_id} technical error: {e}")
         return
     finally:
-        await output.stop()
+        # For non-looping content, ensure all packets are fully sent
+        if not opts["loop"] and hasattr(output, 'flush_and_stop'):
+            await output.flush_and_stop()
+        else:
+            await output.stop()
         # Clean up any temp files from image caching
         cleanup_active_image_sources()
 

@@ -8,7 +8,7 @@ import time
 from collections import deque
 from typing import Dict, Any, Optional, Iterator
 
-from .protocol import BufferedOutputProtocol, OutputTarget, FrameMetadata, OutputProtocolFactory
+from .protocol import BufferedOutputProtocol, OutputProtocol, OutputTarget, FrameMetadata, OutputProtocolFactory
 from ..media.processing import rgb888_to_565_bytes
 from ..utils.helpers import normalize_pixel_format, compute_spacing_and_group
 from ..utils.metrics import PerformanceTracker
@@ -184,7 +184,35 @@ class DDPOutput(BufferedOutputProtocol):
             self.socket = None
             
         print(f"[ddp] stopped output {self.target.output_id}")
-        
+
+    async def flush_and_stop(self) -> None:
+        """Stop DDP output and wait for complete queue drain."""
+        # Stop the base protocol (sets _running = False)
+        await OutputProtocol.stop(self)
+
+        # Wait for worker task to complete naturally (includes all async operations)
+        if self._worker_task and not self._worker_task.done():
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print(f"[output] worker cleanup error: {e!r}")
+
+        # DDP-specific cleanup
+        if self.transport:
+            self.transport.close()
+            self.transport = None
+
+        if self.socket:
+            try:
+                self.socket.close()
+            except Exception:
+                pass
+            self.socket = None
+
+        print(f"[ddp] stopped output {self.target.output_id}")
+
     async def configure(self, new_config: Dict[str, Any]) -> None:
         """Update configuration."""
         if "fmt" in new_config:

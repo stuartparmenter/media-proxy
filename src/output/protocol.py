@@ -111,7 +111,7 @@ class BufferedOutputProtocol(OutputProtocol):
     async def stop(self) -> None:
         """Stop the buffered output and clean up."""
         await super().stop()
-        
+
         if self._worker_task and not self._worker_task.done():
             self._worker_task.cancel()
             try:
@@ -120,13 +120,31 @@ class BufferedOutputProtocol(OutputProtocol):
                 pass
             except Exception as e:
                 print(f"[output] worker cleanup error: {e!r}")
-                
+
         if self._queue:
             # Try to flush remaining items quickly
             try:
                 await asyncio.wait_for(self._queue.join(), timeout=0.5)
             except asyncio.TimeoutError:
                 pass
+
+    async def flush_and_stop(self) -> None:
+        """Stop the buffered output and wait for complete queue drain."""
+        if self._queue:
+            # Wait for all queued items to be processed completely
+            await self._queue.join()
+
+        # Now stop the protocol and clean up
+        await super().stop()
+
+        if self._worker_task and not self._worker_task.done():
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print(f"[output] worker cleanup error: {e!r}")
                 
     async def send_frame(self, frame_data: bytes, metadata: FrameMetadata) -> None:
         """Queue a frame for sending."""

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2025-09-23
+
+### Fixed
+- Fix race condition in non-looping image packet transmission where tasks could exit before all UDP packets (including still frame resends) were fully sent
+
 ## [0.3.1] - 2025-09-23
 
 ### Added
