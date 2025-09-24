@@ -1,0 +1,86 @@
+#include <tunables/global>
+
+profile media_proxy flags=(attach_disconnected,mediate_deleted,complain) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  # Add-on launcher script
+  /run.py r,
+
+  # Python interpreter (Alpine/musl paths)
+  /opt/venv/bin/python3 ix,
+  /usr/bin/python3 ix,
+  /opt/venv/lib/python3.*/** r,
+  /usr/lib/python3.*/** r,
+
+  # Application source code
+  /app/** r,
+
+  # FFmpeg and media libraries (Alpine paths)
+  /usr/bin/ffmpeg ix,
+  /usr/bin/ffprobe ix,
+  /usr/lib/libav*.so* mr,
+  /usr/lib/libswscale*.so* mr,
+  /usr/lib/libswresample*.so* mr,
+  /usr/lib/libpostproc*.so* mr,
+
+  # Hardware acceleration (Intel iGPU via /dev/dri mapping)
+  /dev/dri/* rw,
+  /sys/devices/pci**/drm/card*/uevent r,
+  /usr/lib/dri/*.so mr,
+  /usr/lib/vdpau/*.so mr,
+
+  # Network access for streaming and YouTube downloads
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+
+  # Home Assistant directories (from config.yaml map)
+  /config/** rw,
+  /media/** rw,
+  /addon_config/** rw,
+
+  # Add-on data and options
+  /data/** rw,
+  /data/options.json r,
+
+  # Temporary files (tmpfs enabled in config)
+  /tmp/** rw,
+  owner /tmp/** rw,
+
+  # Alpine system libraries
+  /lib/** r,
+  /usr/lib/** r,
+  /usr/share/** r,
+
+  # DNS resolution (Alpine/musl)
+  /etc/hosts r,
+  /etc/resolv.conf r,
+  /etc/nsswitch.conf r,
+
+  # SSL/TLS certificates (Alpine)
+  /etc/ssl/** r,
+  /usr/share/ca-certificates/** r,
+
+  # Timezone data
+  /usr/share/zoneinfo/** r,
+  /etc/timezone r,
+  /etc/localtime r,
+
+  # S6 overlay runtime (Home Assistant)
+  /run/s6/services/** rw,
+  /var/run/** rw,
+
+  # Process management (for os.execvp in run.py)
+  capability setgid,
+  capability setuid,
+
+  # Deny dangerous capabilities
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny mount,
+  deny umount,
+  deny pivot_root,
+}
