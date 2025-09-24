@@ -22,7 +22,6 @@ from .utils.helpers import (
     parse_expand_mode, parse_hw_preference, parse_pace_hz, truthy, is_youtube_url,
     normalize_pixel_format
 )
-from .utils.hardware import choose_decode_preference
 
 
 # Removed _get_gif_fps_from_pyav - PIL handles GIF timing directly
@@ -225,11 +224,6 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
     """Main streaming task that orchestrates media input -> processing -> output."""
     config = Config()
     
-    # Choose hardware decode preference intelligently
-    hw_prefer = choose_decode_preference(
-        src, opts["hw"], size, opts["expand_mode"]
-    )
-    
     # Create output target and protocol
     target = OutputTarget(
         host=target_ip,
@@ -237,7 +231,7 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
         output_id=output_id,
         protocol="ddp"
     )
-    
+
     output_config = {
         "fmt": opts["fmt"],
         "log_interval_s": config.get("log.rate_ms") / 1000.0,
@@ -246,18 +240,18 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
         "mode": "pace" if opts["pace_hz"] > 0 else "native",
         "pace_hz": opts["pace_hz"],
     }
-    
+
     output = OutputProtocolFactory.create(target, output_config)
-    
+
     try:
         await output.start()
 
         if opts["pace_hz"] > 0:
             # Paced mode: producer + sampler
-            await _run_paced_streaming(output, size, src, opts, hw_prefer)
+            await _run_paced_streaming(output, size, src, opts)
         else:
             # Native cadence mode
-            await _run_native_streaming(output, size, src, opts, hw_prefer)
+            await _run_native_streaming(output, size, src, opts)
 
     except MediaUnavailableError as e:
         # Media source unavailable (HTTP/network errors) - stop this stream task
@@ -282,7 +276,7 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
 
 
 async def _run_native_streaming(output, size: Tuple[int, int], src: str,
-                               opts: Dict[str, Any], hw_prefer: str):
+                               opts: Dict[str, Any]):
     """Run streaming at native source cadence."""
     frames_emitted = 0
     seq = 0
@@ -292,7 +286,7 @@ async def _run_native_streaming(output, size: Tuple[int, int], src: str,
         src, size,
         loop_video=opts["loop"],
         expand_mode=opts["expand_mode"],
-        hw_prefer=hw_prefer,
+        hw_prefer=opts["hw"],
         fit_mode=opts["fit_mode"]
     ):
         # Create frame metadata
@@ -326,7 +320,7 @@ async def _run_native_streaming(output, size: Tuple[int, int], src: str,
 
 
 async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
-                              opts: Dict[str, Any], hw_prefer: str):
+                              opts: Dict[str, Any]):
     """Run streaming with fixed pacing (producer + sampler pattern)."""
     import numpy as np
     
@@ -343,7 +337,7 @@ async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
             src, size,
             loop_video=opts["loop"],
             expand_mode=opts["expand_mode"],
-            hw_prefer=hw_prefer,
+            hw_prefer=opts["hw"],
             fit_mode=opts["fit_mode"]
         ):
             async with latest_lock:

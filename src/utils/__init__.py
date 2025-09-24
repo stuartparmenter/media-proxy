@@ -3,7 +3,7 @@
 
 """Utility modules for hardware detection, metrics, and helpers."""
 
-from .hardware import pick_hw_backend, choose_decode_preference, set_windows_timer_resolution
+from .hardware import pick_hw_backend, set_windows_timer_resolution
 from .metrics import RateMeter, PerformanceTracker
 from .helpers import (
     is_youtube_url, is_http_url, resolve_local_path, truthy,
@@ -13,7 +13,7 @@ from .helpers import (
 
 __all__ = [
     # Hardware
-    "pick_hw_backend", "choose_decode_preference", "set_windows_timer_resolution",
+    "pick_hw_backend", "set_windows_timer_resolution",
     # Metrics
     "RateMeter", "PerformanceTracker",
     # Helpers
