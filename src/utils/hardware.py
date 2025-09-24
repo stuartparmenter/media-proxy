@@ -1,6 +1,7 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
+import logging
 import os
 import platform
 import shutil
@@ -77,12 +78,12 @@ def choose_decode_preference(
     Returns preference string to pass to pick_hw_backend().
     """
     if prefer and str(prefer).lower() not in ("", "auto"):
-        print(f"[decode] prefer={prefer!r} explicitly requested -> honoring")
+        logging.getLogger('hardware').info(f"prefer={prefer!r} explicitly requested -> honoring")
         return prefer
 
     # Always use hardware acceleration if available
     kind, _ = pick_hw_backend("auto")
-    print(f"[decode] choosing HW 'auto'; auto maps to {kind or 'none'}")
+    logging.getLogger('hardware').info(f"choosing HW 'auto'; auto maps to {kind or 'none'}")
     return "auto"
 
 
@@ -96,4 +97,4 @@ def set_windows_timer_resolution(enable: bool = True) -> None:
             else:
                 ctypes.windll.winmm.timeEndPeriod(1)
         except Exception as e:
-            print(f"[warn] timeBeginPeriod/timeEndPeriod failed: {e}")
+            logging.getLogger('hardware').warning(f"timeBeginPeriod/timeEndPeriod failed: {e}")

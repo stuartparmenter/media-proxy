@@ -4,6 +4,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 from typing import Dict, Any
 import websockets
 from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, ConnectionClosedError
@@ -66,7 +67,7 @@ class WebSocketControlProtocol(ControlProtocol):
             if not hello_successful:
                 return
                 
-            print(f"* hello from {session.client_ip} dev={session.device_id}")
+            logging.getLogger('websocket').info(f"hello from {session.client_ip} dev={session.device_id}")
             
             # Message loop
             await self._handle_message_loop(session)
@@ -74,9 +75,9 @@ class WebSocketControlProtocol(ControlProtocol):
         except Exception as exc:
             if is_benign_disconnect(exc):
                 reason = getattr(exc, 'reason', '') or (getattr(exc, 'args', [''])[0])
-                print(f"* disconnect {session.client_ip} ({type(exc).__name__}: {reason})")
+                logging.getLogger('websocket').info(f"disconnect {session.client_ip} ({type(exc).__name__}: {reason})")
             else:
-                print(f"[warn] websocket error from {session.client_ip}: {exc!r}")
+                logging.getLogger('websocket').warning(f"websocket error from {session.client_ip}: {exc!r}")
         finally:
             # Clean up all streams
             await self.cleanup_session(session)
@@ -91,7 +92,7 @@ class WebSocketControlProtocol(ControlProtocol):
             raw = await ws.recv()
             hello = json.loads(raw)
         except ConnectionClosed as e:
-            print(f"* disconnect during handshake from {session.client_ip} "
+            logging.getLogger('websocket').info(f"disconnect during handshake from {session.client_ip} "
                   f"({getattr(e, 'code', '')} {getattr(e, 'reason', '')})")
             return False
         except Exception as e:
@@ -152,14 +153,14 @@ async def dispatch_websocket(websocket):
             await websocket.close(code=4003, reason="unknown path")
     except Exception as e:
         if not is_benign_disconnect(e):
-            print(f"[warn] websocket handler error: {e!r}")
+            logging.getLogger('websocket').warning(f"websocket handler error: {e!r}")
         with contextlib.suppress(Exception):
             await websocket.close()
 
 
 async def start_websocket_server(host: str = "0.0.0.0", port: int = 8788):
     """Start the WebSocket server."""
-    print(f"* WebSocket server on ws://{host}:{port}/control")
+    logging.getLogger('websocket').info(f"WebSocket server on ws://{host}:{port}/control")
     
     server = await websockets.serve(
         dispatch_websocket, 

@@ -4,6 +4,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import asyncio
+import logging
 from .fields import ControlFields
 
 
@@ -111,5 +112,5 @@ class ControlProtocol(ABC):
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"[control] stream cleanup error out={out_id}: {e!r}")
+                logging.getLogger('protocol').error(f"stream cleanup error out={out_id}: {e!r}")
                 

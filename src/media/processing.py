@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import io
+import logging
 import numpy as np
 from PIL import Image, ImageFilter, ImageCms
 from typing import Tuple
@@ -54,7 +55,7 @@ def convert_to_srgb(img: Image.Image, config: Config = None) -> Image.Image:
         except:
             profile_name = "unknown"
 
-        print(f"[color] Converting {profile_name.strip()} -> sRGB")
+        logging.getLogger('processing').info(f"Converting {profile_name.strip()} -> sRGB")
 
         # Create transformation from source to sRGB
         transform = ImageCms.buildTransformFromOpenProfiles(
@@ -76,7 +77,7 @@ def convert_to_srgb(img: Image.Image, config: Config = None) -> Image.Image:
         return converted_img
 
     except Exception as e:
-        print(f"[color] Color conversion failed: {e}")
+        logging.getLogger('processing').warning(f"Color conversion failed: {e}")
         return img
 
 

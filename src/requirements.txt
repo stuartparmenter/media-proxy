@@ -7,5 +7,8 @@ PyYAML>=6,<7
 websockets>=12,<16
 yt-dlp>=2024.10,<2026
 
+# TOML support for Python < 3.11
+tomli>=2,<3 ; python_version<"3.11"
+
 # Optional perf (POSIX only)
 uvloop>=0.21 ; platform_system!="Windows"

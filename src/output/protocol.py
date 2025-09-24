@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Union, Tuple
 from dataclasses import dataclass
 import asyncio
+import logging
 import time
 
 
@@ -119,7 +120,7 @@ class BufferedOutputProtocol(OutputProtocol):
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"[output] worker cleanup error: {e!r}")
+                logging.getLogger('output').error(f"worker cleanup error: {e!r}")
 
         if self._queue:
             # Try to flush remaining items quickly
@@ -144,7 +145,7 @@ class BufferedOutputProtocol(OutputProtocol):
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"[output] worker cleanup error: {e!r}")
+                logging.getLogger('output').error(f"worker cleanup error: {e!r}")
                 
     async def send_frame(self, frame_data: bytes, metadata: FrameMetadata) -> None:
         """Queue a frame for sending."""
@@ -177,7 +178,7 @@ class BufferedOutputProtocol(OutputProtocol):
                     self.metrics.frames_sent += 1
                     self.metrics.bytes_sent += len(frame_data)
                 except Exception as e:
-                    print(f"[output] frame send error: {e!r}")
+                    logging.getLogger('output').error(f"frame send error: {e!r}")
                 finally:
                     self._queue.task_done()
                     
@@ -188,7 +189,7 @@ class BufferedOutputProtocol(OutputProtocol):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            print(f"[output] worker loop error: {e!r}")
+            logging.getLogger('output').error(f"worker loop error: {e!r}")
 
 
 class StreamingOutputProtocol(OutputProtocol):
@@ -212,7 +213,7 @@ class StreamingOutputProtocol(OutputProtocol):
             self.metrics.frames_sent += 1
             self.metrics.bytes_sent += len(frame_data)
         except Exception as e:
-            print(f"[output] streaming frame error: {e!r}")
+            logging.getLogger('output').error(f"streaming frame error: {e!r}")
 
 
 class OutputProtocolFactory:

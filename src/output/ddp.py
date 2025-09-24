@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import logging
 import socket
 import struct
 import time
@@ -44,11 +45,11 @@ class DDPSender(asyncio.DatagramProtocol):
         self.transport = transport  # type: ignore[assignment]
 
     def error_received(self, exc: BaseException) -> None:
-        print(f"[udp] error_received: {exc!r}")
+        logging.getLogger('ddp').error(f"error_received: {exc!r}")
 
     def connection_lost(self, exc: BaseException | None) -> None:
         if exc:
-            print(f"[udp] connection_lost: {exc!r}")
+            logging.getLogger('ddp').error(f"connection_lost: {exc!r}")
 
     def sendto(self, data: bytes, addr):
         if self.transport is not None:
@@ -118,7 +119,6 @@ class DDPOutput(BufferedOutputProtocol):
         
         # Performance tracking and logging configuration
         self.log_metrics = config.get("log_metrics")
-        self.log_detail = config.get("log_detail")
         self.tracker = PerformanceTracker(
             log_interval_s=config.get("log_interval_s")
         )
@@ -166,7 +166,7 @@ class DDPOutput(BufferedOutputProtocol):
         )
         self.socket = sock
         
-        print(f"[ddp] started output to {self.target.host}:{self.target.port} (id={self.target.output_id})")
+        logging.getLogger('ddp').info(f"started output to {self.target.host}:{self.target.port} (id={self.target.output_id})")
         
     async def stop(self) -> None:
         """Clean up UDP transport."""
@@ -183,7 +183,7 @@ class DDPOutput(BufferedOutputProtocol):
                 pass
             self.socket = None
             
-        print(f"[ddp] stopped output {self.target.output_id}")
+        logging.getLogger('ddp').info(f"stopped output {self.target.output_id}")
 
     async def flush_and_stop(self) -> None:
         """Stop DDP output and wait for complete queue drain."""
@@ -197,7 +197,7 @@ class DDPOutput(BufferedOutputProtocol):
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"[output] worker cleanup error: {e!r}")
+                logging.getLogger('ddp').error(f"worker cleanup error: {e!r}")
 
         # DDP-specific cleanup
         if self.transport:
@@ -211,7 +211,7 @@ class DDPOutput(BufferedOutputProtocol):
                 pass
             self.socket = None
 
-        print(f"[ddp] stopped output {self.target.output_id}")
+        logging.getLogger('ddp').info(f"stopped output {self.target.output_id}")
 
     async def configure(self, new_config: Dict[str, Any]) -> None:
         """Update configuration."""
@@ -334,7 +334,7 @@ class DDPOutput(BufferedOutputProtocol):
         
         # Burst phase
         if burst > 0:
-            print(f"[ddp] still resend burst={burst} output={self.target.output_id}")
+            logging.getLogger('ddp').info(f"still resend burst={burst} output={self.target.output_id}")
             for i in range(burst):
                 before_enq = self._packets_enqueued
                 packets = list(ddp_iter_packets(
@@ -346,8 +346,7 @@ class DDPOutput(BufferedOutputProtocol):
                     self._packets_enqueued += 1
 
                 after_enq = self._packets_enqueued
-                if self.log_detail:
-                    print(f"[send] still-burst out={self.target.output_id} {i+1}/{burst} enq+={after_enq-before_enq} q={len(self._frame_queue)}/{self._max_queue_size}")
+                logging.getLogger('ddp').debug(f"still-burst out={self.target.output_id} {i+1}/{burst} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
 
                 if spacing_ms > 0 and i < burst - 1:
                     await asyncio.sleep(spacing_ms / 1000.0)
@@ -355,7 +354,7 @@ class DDPOutput(BufferedOutputProtocol):
         # Tail phase
         if tail_s > 0 and tail_hz > 0:
             est = int(tail_s * tail_hz)
-            print(f"[ddp] still resend tail={tail_s}s @ {tail_hz}Hz output={self.target.output_id} (~{est} sends)")
+            logging.getLogger('ddp').debug(f"still resend tail={tail_s}s @ {tail_hz}Hz output={self.target.output_id} (~{est} sends)")
             loop = asyncio.get_running_loop()
             end_time = loop.time() + tail_s
             tick = 1.0 / tail_hz
@@ -373,8 +372,7 @@ class DDPOutput(BufferedOutputProtocol):
                     self._packets_enqueued += 1
 
                 after_enq = self._packets_enqueued
-                if self.log_detail:
-                    print(f"[send] still-tail out={self.target.output_id} {i}/{est} enq+={after_enq-before_enq} q={len(self._frame_queue)}/{self._max_queue_size}")
+                logging.getLogger('ddp').debug(f"still-tail out={self.target.output_id} {i}/{est} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
 
                 await asyncio.sleep(max(0.0, next_time - loop.time()))
                 next_time += tick
@@ -388,8 +386,8 @@ class DDPOutput(BufferedOutputProtocol):
 
         if self.mode == "pace":
             # Paced mode logging
-            print(
-                f"[send] out={self.target.output_id} pace={self.pace_hz}Hz "
+            logging.getLogger('ddp').info(
+                f"out={self.target.output_id} pace={self.pace_hz}Hz "
                 f"fps={metrics['fps']:.2f} pps={metrics['pps']:.0f} "
                 f"pkt_jit={metrics['packet_jitter_ms']:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
                 f"q_avg={metrics['queue_avg']:.0f}/{self._max_queue_size} "
@@ -400,8 +398,8 @@ class DDPOutput(BufferedOutputProtocol):
         else:
             # Native mode logging with target FPS
             target_fps = 1000.0 / max(self.last_delay_ms or 33.33, 1.0)
-            print(
-                f"[send] out={self.target.output_id} native "
+            logging.getLogger('ddp').info(
+                f"out={self.target.output_id} native "
                 f"fps={metrics['fps']:.2f} (~{target_fps:.1f} tgt) pps={metrics['pps']:.0f} "
                 f"pkt_jit={metrics['packet_jitter_ms']:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
                 f"q_avg={metrics['queue_avg']:.0f}/{self._max_queue_size} "

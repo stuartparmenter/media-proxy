@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import logging
 import os
 from typing import Dict, Any, AsyncIterator, Tuple, Optional
 from urllib.parse import unquote
@@ -53,15 +54,15 @@ async def stream_frames(
                     resolved_url = source.resolved_url
                     # Check if resolution actually succeeded (resolved URL should be different)
                     if resolved_url == src_url:
-                        print(f"[retry] YouTube URL resolution failed on attempt {retry_count + 1}, will retry on PyAV error")
+                        logging.getLogger('streaming').info(f"YouTube URL resolution failed on attempt {retry_count + 1}, will retry on PyAV error")
                 except Exception as e:
                     if isinstance(e, yt_dlp.DownloadError):
                         # YouTube format unavailable - trigger retry immediately
-                        print(f"[retry] YouTube DownloadError detected: {e}")
+                        logging.getLogger('streaming').info(f"YouTube DownloadError detected: {e}")
                         retry_count += 1
                         if retry_count > max_retries:
                             raise MediaUnavailableError(f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e) from e
-                        print(f"[retry] YouTube DownloadError (attempt {retry_count}/{max_retries}), re-resolving...")
+                        logging.getLogger('streaming').info(f"YouTube DownloadError (attempt {retry_count}/{max_retries}), re-resolving...")
                         await asyncio.sleep(0.5)
                         continue
                     else:
@@ -110,11 +111,11 @@ async def stream_frames(
             # PyAV errors from video.py
             if is_youtube_url(original_src):
                 # For YouTube URLs, these errors likely mean URL expiration or failed resolution - trigger retry
-                print(f"[retry] YouTube error detected: {e}")
+                logging.getLogger('streaming').info(f"YouTube error detected: {e}")
                 retry_count += 1
                 if retry_count > max_retries:
                     raise MediaUnavailableError(f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e) from e
-                print(f"[retry] YouTube URL issue (attempt {retry_count}/{max_retries}), re-resolving...")
+                logging.getLogger('streaming').info(f"YouTube URL issue (attempt {retry_count}/{max_retries}), re-resolving...")
                 await asyncio.sleep(0.5)
                 continue
             else:
@@ -187,7 +188,7 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
 
     # Note: Local file validation is handled during frame iteration
 
-    print(f"* start_stream {session.client_ip} dev={session.device_id} out={output_id} "
+    logging.getLogger('streaming').info(f"start_stream {session.client_ip} dev={session.device_id} out={output_id} "
           f"size={width}x{height} ddp_port={ddp_port} src={src} "
           f"pace={opts['pace_hz']} ema={opts['ema_alpha']} expand={opts['expand_mode']} "
           f"loop={opts['loop']} hw={opts['hw']} fmt={opts['fmt']} fit={opts['fit_mode']}")
@@ -210,10 +211,10 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
         except asyncio.CancelledError:
             return
         except Exception as e:
-            print(f"[task] out={output_id} exception(): {e!r}")
+            logging.getLogger('streaming').error(f"out={output_id} exception(): {e!r}")
             return
         if exc:
-            print(f"[task] out={output_id} crashed: {exc!r}")
+            logging.getLogger('streaming').error(f"out={output_id} crashed: {exc!r}")
     task.add_done_callback(on_done)
 
     return task
@@ -241,7 +242,6 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
         "fmt": opts["fmt"],
         "log_interval_s": config.get("log.rate_ms") / 1000.0,
         "log_metrics": config.get("log.metrics"),
-        "log_detail": config.get("log.detail"),
         "max_queue_size": 4096,
         "mode": "pace" if opts["pace_hz"] > 0 else "native",
         "pace_hz": opts["pace_hz"],
@@ -261,15 +261,15 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
 
     except MediaUnavailableError as e:
         # Media source unavailable (HTTP/network errors) - stop this stream task
-        print(f"[stream] {target.output_id} media unavailable: {e}")
+        logging.getLogger('streaming').warning(f"{target.output_id} media unavailable: {e}")
         return
     except FileNotFoundError as e:
         # Actual file not found - stop this stream task
-        print(f"[stream] {target.output_id} file not found: {e}")
+        logging.getLogger('streaming').warning(f"{target.output_id} file not found: {e}")
         return
     except Exception as e:
         # Technical errors (codec issues, etc.) - stop this stream task
-        print(f"[stream] {target.output_id} technical error: {e}")
+        logging.getLogger('streaming').error(f"{target.output_id} technical error: {e}")
         return
     finally:
         # For non-looping content, ensure all packets are fully sent

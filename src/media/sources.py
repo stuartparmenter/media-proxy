@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import logging
 from typing import Dict, Optional, Tuple
 from urllib.parse import unquote
 
@@ -72,13 +73,14 @@ async def resolve_stream_url_async(src_url: str) -> Tuple[str, Dict[str, str]]:
         # Run in thread pool to avoid blocking the event loop
         return await loop.run_in_executor(None, _extract_info)
     except Exception as e:
+        logger = logging.getLogger('sources')
         if isinstance(e, yt_dlp.DownloadError):
             # Re-raise DownloadError for proper handling upstream
-            print(f"[warn] YouTube URL resolution failed for {src_url}: {e!r}")
+            logger.warning(f"URL resolution failed for {src_url}: {e!r}")
             raise
         else:
             # Other exceptions - log and return original URL
-            print(f"[warn] YouTube URL resolution failed for {src_url}: {e!r}")
+            logger.warning(f"URL resolution failed for {src_url}: {e!r}")
             return src_url, {}
 
 

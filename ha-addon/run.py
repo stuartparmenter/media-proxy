@@ -7,10 +7,6 @@ OPTIONS = "/data/options.json"
 SERVER  = "/app/src/run.py"
 
 def main():
-    # Force line buffering - flush after each newline (print statements)
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
-
     try:
         with open(OPTIONS, "r", encoding="utf-8") as f:
             o = json.load(f)

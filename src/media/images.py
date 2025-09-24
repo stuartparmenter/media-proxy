@@ -10,6 +10,7 @@ import tempfile
 import os
 import weakref
 import atexit
+import logging
 from abc import ABC, abstractmethod
 
 from ..config import Config
@@ -111,7 +112,7 @@ def cleanup_active_image_sources():
     """Clean up all active image sources. Called when streams are stopped."""
     active_count = len(_active_image_sources)
     if active_count > 0:
-        print(f"[cache] cleaning up {active_count} active image sources")
+        logging.getLogger('images').info(f"cleaning up {active_count} active image sources")
         _cleanup_all_sources()
         return active_count
     return 0
@@ -178,9 +179,9 @@ class TempFileSource(ImageSource):
         try:
             if os.path.exists(self.temp_path):
                 os.unlink(self.temp_path)
-                print(f"[cache] cleaned up temp file: {os.path.basename(self.temp_path)}")
+                logging.getLogger('images').debug(f"cleaned up temp file: {os.path.basename(self.temp_path)}")
         except Exception as e:
-            print(f"[cache] temp file cleanup warning: {e}")
+            logging.getLogger('images').warning(f"temp file cleanup warning: {e}")
         finally:
             self._cleaned = True
             # Remove from tracking (weakref will handle this automatically too)

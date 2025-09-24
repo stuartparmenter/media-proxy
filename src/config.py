@@ -2,8 +2,15 @@
 # SPDX-License-Identifier: MIT
 
 import json
+import logging
 import os
 from typing import Dict, Any
+
+import yaml
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    import tomli as tomllib  # Fallback for older Python versions
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -34,7 +41,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "log": {
         "send_ms": False,
         "rate_ms": 5000,
-        "detail": False,
+        "level": "info",
         "metrics": True
     },
     "net": {
@@ -56,42 +63,31 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 def load_config_file(path: str) -> Dict[str, Any]:
     """Load configuration from a file (YAML, TOML, or JSON)."""
+    logger = logging.getLogger('config')
     ext = os.path.splitext(path)[1].lower()
+
     if not os.path.exists(path):
         return {}
-    
+
     try:
         if ext in (".yaml", ".yml"):
-            try:
-                import yaml  # type: ignore
-            except Exception:
-                print("[config] PyYAML not installed; skipping YAML.")
-                return {}
             with open(path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
-        
+
         elif ext == ".toml":
-            try:
-                import tomllib  # 3.11+
-            except Exception:
-                try:
-                    import tomli as tomllib  # type: ignore
-                except Exception:
-                    print("[config] tomllib/tomli not installed; skipping TOML.")
-                    return {}
             with open(path, "rb") as f:
                 return tomllib.load(f) or {}
-        
+
         elif ext == ".json":
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f) or {}
-        
+
         else:
-            print(f"[config] Unknown config extension: {ext}")
+            logger.warning(f"Unknown config extension: {ext}")
             return {}
-            
+
     except Exception as e:
-        print(f"[config] Failed to load {path}: {e}")
+        logger.warning(f"Failed to load {path}: {e}")
         return {}
 
 

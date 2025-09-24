@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import contextlib
+import logging
 import numpy as np
 from typing import Iterator, Tuple, Dict, Optional
 import av
@@ -26,9 +27,9 @@ def open_with_hwaccel(src_url: str, prefer: Optional[str], options: Optional[Dic
             except Exception as ie:
                 raise RuntimeError(f"hwaccel API unavailable: {ie}")
             container = av.open(src_url, mode="r", hwaccel=HWAccel(device_type=kind), options=options)
-            print(f"[hw] selected {kind} for decode")
+            logging.getLogger('video').info(f"selected {kind} for decode")
         else:
-            print("[hw] using CPU decode (no HW accel selected)")
+            logging.getLogger('video').info("using CPU decode (no HW accel selected)")
             container = av.open(src_url, mode="r", options=options)
         
         vstream = next((s for s in container.streams if s.type == "video"), None)
@@ -37,7 +38,7 @@ def open_with_hwaccel(src_url: str, prefer: Optional[str], options: Optional[Dic
         return container, vstream
         
     except Exception as e:
-        print(f"[hwaccel disabled: {kind or 'auto'} not available: {e}]")
+        logging.getLogger('video').info(f"hwaccel disabled: {kind or 'auto'} not available: {e}")
         container = av.open(src_url, mode="r", options=options)
         vstream = next((s for s in container.streams if s.type == "video"), None)
         if vstream is None:
@@ -209,7 +210,7 @@ class PyAvFrameIterator(FrameIterator):
         if is_youtube_url(self.src_url) and self.real_src_url == self.src_url:
             # If real_src_url wasn't updated, resolution may have failed
             # Try to proceed with original URL - if it fails, we'll get HTTP errors
-            print(f"[video] YouTube URL resolution may have failed, trying original URL: {self.src_url}")
+            logging.getLogger('video').warning(f"YouTube URL resolution may have failed, trying original URL: {self.src_url}")
 
         # Implement the PyAV iteration directly in the protocol class
         config = Config()
@@ -281,13 +282,13 @@ class PyAvFrameIterator(FrameIterator):
 
                 old = g_props.copy()
                 g_props.update({"w": w, "h": h, "fmt": fmt_name, "sar": (sar_n, sar_d), "rot": rot, "ac_applied": want_ac})
-                print(f"[graph] rebuild: {old} -> {g_props} (ac={ac_crop if (ac_enabled and ac_decided) else 'pending'})")
+                logging.getLogger('video').debug(f"rebuild: {old} -> {g_props} (ac={ac_crop if (ac_enabled and ac_decided) else 'pending'})")
 
                 if not first_graph_log_done:
                     try:
                         cc = getattr(vstream, "codec_context", None)
                         in_sar = getattr(cc, "sample_aspect_ratio", None)
-                        print(f"[graph] input codec SAR={in_sar} size={w}x{h}")
+                        logging.getLogger('video').info(f"input codec SAR={in_sar} size={w}x{h}")
                     except Exception:
                         pass
                     first_graph_log_done = True
