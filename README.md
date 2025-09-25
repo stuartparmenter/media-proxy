@@ -50,7 +50,7 @@ hw:
   prefer: auto
 
 video:
-  expand_mode: 1        # 0=never, 1=auto(limited->full), 2=force
+  expand_mode: 2        # 0=never, 1=auto(limited->full), 2=force
   fit: pad              # cover | pad
   autocrop:
     enabled: true
@@ -62,19 +62,23 @@ video:
 playback:
   loop: true
 
+youtube:
+  60fps: true           # Try 60fps at 720p first, then fall back to resolution-optimized selection
+
 image:
-  method: lanczos       # lanczos | bicubic | bilinear | box | nearest
+  method: lanczos       # lanczos | bicubic | bilinear | box | nearest | auto
   gamma_correct: false
+  color_correction: true
   unsharp:
     amount: 0.0
     radius: 0.6
     threshold: 2
 
 log:
+  level: info
   metrics: true
-  rate_ms: 1000
+  rate_ms: 5000
   send_ms: false
-  detail: false
 
 net:
   win_timer_res: true
@@ -89,6 +93,30 @@ playback_still:
   tail_s: 2.0
   tail_hz: 2
 ```
+
+---
+
+## YouTube Optimization
+
+Media Proxy intelligently selects YouTube formats based on your display size and hardware acceleration:
+
+**Resolution Matching:** Automatically selects the most appropriate resolution for your display:
+- 64×64 displays use 144p → 240p → 360p streams
+- 480×480 displays use 480p → 360p → 720p streams
+- Reduces bandwidth usage while maintaining visual quality
+
+**60fps Content:** With `youtube.60fps: true` (default), prioritizes smooth motion:
+- Attempts 60fps at 720p first, regardless of display size (YouTube only offers 60fps at 720p+)
+- Falls back to resolution-matched formats if 60fps unavailable
+- Set to `false` to prioritize bandwidth/CPU efficiency over framerate
+
+**Hardware Acceleration:** Codec selection optimized for your acceleration method:
+- **VAAPI:** AV1 → VP9 → H.265 → H.264 (modern codec preference)
+- **Quick Sync:** H.265 → H.264 → AV1 (optimized for Intel's HEVC support)
+- **CUDA:** AV1 → H.265 → H.264 (RTX 30+ series supports AV1 decode)
+- **CPU fallback:** H.264 → VP9 → H.265 (efficiency-focused)
+
+Enable `log.level: debug` to see format selection details.
 
 ---
 
