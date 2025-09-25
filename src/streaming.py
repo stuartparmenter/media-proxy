@@ -22,6 +22,7 @@ from .utils.helpers import (
     parse_expand_mode, parse_hw_preference, parse_pace_hz, truthy, is_youtube_url,
     normalize_pixel_format
 )
+from .utils.hardware import pick_hw_backend
 
 
 # Removed _get_gif_fps_from_pyav - PIL handles GIF timing directly
@@ -49,7 +50,7 @@ async def stream_frames(
             # For YouTube URLs, resolve to get actual stream URL and options
             if is_youtube_url(src_url):
                 try:
-                    source = await resolve_media_source(src_url)
+                    source = await resolve_media_source(src_url, size, hw_prefer)
                     resolved_url = source.resolved_url
                     # Check if resolution actually succeeded (resolved URL should be different)
                     if resolved_url == src_url:
@@ -148,26 +149,32 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
     # Parse options using field-aware helpers
     opts = {}
 
-    # Process each field that can be applied to the stream
-    for field_name, value in params.items():
-        field_def = ControlFields.get_field_info(field_name)
-        if field_def is None:
-            continue
+    # Copy validated parameters directly - fields.py has already validated them
+    # Map field names to internal option names
+    opts = {}
+    field_to_opts_mapping = {
+        "loop": "loop",
+        "expand": "expand_mode",
+        "hw": "hw",
+        "pace": "pace_hz",
+        "ema": "ema_alpha",
+        "fmt": "fmt",
+        "fit": "fit_mode"
+    }
 
-        if field_name == "loop":
-            opts["loop"] = truthy(str(value)) if value is not None else config.get("playback.loop")
-        elif field_name == "expand":
-            opts["expand_mode"] = parse_expand_mode(value, config.get("video.expand_mode"))
-        elif field_name == "hw":
-            opts["hw"] = parse_hw_preference(value, config.get("hw.prefer"))
-        elif field_name == "pace":
-            opts["pace_hz"] = parse_pace_hz(value)
-        elif field_name == "ema":
-            opts["ema_alpha"] = max(0.0, min(float(value), 1.0)) if value is not None else 0.0
-        elif field_name == "fmt":
-            opts["fmt"] = normalize_pixel_format(str(value)) if value is not None else "rgb888"
-        elif field_name == "fit":
-            opts["fit_mode"] = str(value) if value is not None else None
+    for field_name, value in params.items():
+        if field_name in field_to_opts_mapping:
+            opts_key = field_to_opts_mapping[field_name]
+
+            # Apply minimal necessary transformations
+            if field_name == "loop":
+                opts[opts_key] = truthy(str(value)) if value is not None else None
+            elif field_name == "ema":
+                opts[opts_key] = max(0.0, min(float(value), 1.0)) if value is not None else None
+            elif field_name == "fmt":
+                opts[opts_key] = normalize_pixel_format(str(value)) if value is not None else None
+            else:
+                opts[opts_key] = value
 
     # Set defaults for any missing options
     if "loop" not in opts:
@@ -184,6 +191,12 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
         opts["fmt"] = normalize_pixel_format("rgb888")
     if "fit_mode" not in opts:
         opts["fit_mode"] = config.get("video.fit")
+
+    # Resolve hardware backend for format optimization and decode
+    if opts.get("hw") == "auto":
+        resolved_hw_backend = pick_hw_backend("auto")
+        opts["hw"] = resolved_hw_backend
+        logging.getLogger('streaming').debug(f"Resolved hw=auto to hw={resolved_hw_backend}")
 
     # Note: Local file validation is handled during frame iteration
 

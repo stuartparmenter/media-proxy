@@ -6,7 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional
 
 # Cache for hardware acceleration detection
 _hw_backend_cache = None
@@ -37,7 +37,7 @@ def _build_hw_backend_cache():
         return set()
 
 
-def pick_hw_backend(prefer: Optional[str] = None) -> Tuple[Optional[str], Dict[str, Any]]:
+def pick_hw_backend(prefer: Optional[str] = None) -> Optional[str]:
     """Pick the best hardware acceleration backend for this system."""
     global _hw_backend_cache
     if _hw_backend_cache is None:
@@ -45,14 +45,14 @@ def pick_hw_backend(prefer: Optional[str] = None) -> Tuple[Optional[str], Dict[s
 
     sys = platform.system().lower()
     prefer = (prefer or "auto").lower()
-    ALIASES = {"d3d11": "d3d11va", "gpu": "cuda"}
+    ALIASES = {"d3d11": "d3d11va"}
 
     def norm(n):
         return ALIASES.get(n, n)
 
     if prefer not in ("", "auto", "none"):
         pn = norm(prefer)
-        return (pn if pn in _hw_backend_cache else None, {})
+        return pn if pn in _hw_backend_cache else None
 
     # Auto selection based on platform
     if sys == "windows":
@@ -64,9 +64,9 @@ def pick_hw_backend(prefer: Optional[str] = None) -> Tuple[Optional[str], Dict[s
 
     for cand in candidates:
         if cand in _hw_backend_cache:
-            return cand, {}
+            return cand
 
-    return (None, {})
+    return None
 
 
 def set_windows_timer_resolution(enable: bool = True) -> None:

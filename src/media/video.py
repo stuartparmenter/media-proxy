@@ -9,25 +9,23 @@ import av
 from av.filter import Graph as AvFilterGraph
 
 from ..config import Config
-from ..utils.hardware import pick_hw_backend
 from .protocol import FrameIterator, FrameIteratorConfig
 
 MIN_DELAY_MS = 10.0
 
 
-def open_with_hwaccel(src_url: str, prefer: Optional[str], options: Optional[Dict[str, str]] = None):
-    """Open media container with optional hardware acceleration."""
-    kind, _kw = pick_hw_backend(prefer)
+def open_stream(src_url: str, hw_backend: Optional[str], options: Optional[Dict[str, str]] = None):
+    """Open media container with resolved hardware acceleration backend."""
     options = options or {}
-    
+
     try:
-        if kind:
+        if hw_backend:
             try:
                 from av.codec.hwaccel import HWAccel
             except Exception as ie:
                 raise RuntimeError(f"hwaccel API unavailable: {ie}")
-            container = av.open(src_url, mode="r", hwaccel=HWAccel(device_type=kind), options=options)
-            logging.getLogger('video').info(f"selected {kind} for decode")
+            container = av.open(src_url, mode="r", hwaccel=HWAccel(device_type=hw_backend), options=options)
+            logging.getLogger('video').info(f"selected {hw_backend} for decode")
         else:
             logging.getLogger('video').info("using CPU decode (no HW accel selected)")
             container = av.open(src_url, mode="r", options=options)
@@ -236,7 +234,7 @@ class PyAvFrameIterator(FrameIterator):
         first_graph_log_done = False
 
         try:
-            container, vstream = open_with_hwaccel(self.real_src_url, self.config.hw_prefer, options=self.http_opts)
+            container, vstream = open_stream(self.real_src_url, self.config.hw_prefer, options=self.http_opts)
             if vstream is None:
                 raise RuntimeError("no video stream")
 

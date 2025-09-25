@@ -11,6 +11,106 @@ import yt_dlp
 from ..utils.helpers import is_youtube_url, headers_dict_to_ffmpeg_opt
 
 
+def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: bool = True) -> Tuple[str, None]:
+    """
+    Build optimized yt-dlp format selector based on target resolution and hardware.
+
+    Args:
+        W, H: Target minimum resolution (width, height)
+        mode: Hardware acceleration mode (None, "vaapi", "qsv", "cuda", "videotoolbox", "d3d11va")
+        video_only: Prefer video-only streams, fallback to combined if needed
+
+    Returns:
+        (format_expr, None) tuple - ordering in format_expr handles priority
+    """
+    # Hardware-optimized codec preferences
+    codec_preferences = {
+        "vaapi": ["av01", "vp9", "vp09", "h265", "hevc", "hev1", "h264", "avc1", "avc3"],  # Intel/AMD Linux
+        "qsv": ["h265", "hevc", "hev1", "h264", "avc1", "avc3", "av01", "vp9"],          # Intel Quick Sync
+        "cuda": ["av01", "h265", "hevc", "hev1", "h264", "avc1", "avc3", "vp9"],         # NVIDIA NVDEC (RTX 30+ has AV1 decode)
+        "videotoolbox": ["h264", "avc1", "avc3", "h265", "hevc", "hev1", "av01", "vp9"], # macOS
+        "d3d11va": ["h264", "avc1", "avc3", "h265", "hevc", "hev1", "av01", "vp9"],      # Windows D3D11
+        None: ["h264", "avc1", "avc3", "vp9", "vp09", "h265", "hevc", "hev1", "av01"]    # CPU fallback
+    }
+
+    codecs = codec_preferences.get(mode, codec_preferences[None])
+    vcodec_regex = "^(" + "|".join(codecs) + ")$"
+
+    # Calculate reasonable max resolution to avoid extreme over-fetching
+    max_H = min(H * 4, 1080)  # Cap at 1080p unless display is >270px tall
+
+    # For very small displays, be much more aggressive about resolution capping
+    if H <= 64:  # For displays 64px or smaller (like 64x64)
+        max_H = min(max_H, 480)  # Cap at 480p max for tiny displays
+    elif H <= 128:  # For displays 65-128px
+        max_H = min(max_H, 720)  # Cap at 720p
+
+    # Determine optimal resolution tiers based on target size
+    # Start with closest match to target, then progressively larger
+    resolutions = []
+    if H <= 144:
+        resolutions = [144, 240, 360, 480]  # For very small displays, start with 144p
+    elif H <= 240:
+        resolutions = [240, 144, 360, 480, 720]
+    elif H <= 360:
+        resolutions = [360, 240, 480, 720, 1080]
+    elif H <= 480:
+        resolutions = [480, 360, 240, 720, 1080]  # Include smaller fallbacks
+    elif H <= 720:
+        resolutions = [720, 1080, 480, 360, 240]  # Prefer going up to 1080p before falling back
+    else:
+        resolutions = [1080, 720, 480, 360, 240, 144]  # Include all smaller fallbacks
+
+    # Filter resolutions that exceed our max_H cap
+    resolutions = [r for r in resolutions if r <= max_H]
+
+    # Ensure we have at least one fallback
+    if not resolutions:
+        resolutions = [240]
+
+    components = []
+
+    # Build codec-specific selectors for each resolution
+    # This ensures explicit codec priority ordering
+    for res in resolutions:
+        # For each codec in preference order, add specific selectors
+        for i, codec in enumerate(codecs):
+            # 60fps first - prioritize video-only
+            components.append(f'bv*[fps>=60][vcodec*={codec}][height>={res}][height<={res}]')
+            if not video_only:
+                components.append(f'b[fps>=60][vcodec*={codec}][height>={res}][height<={res}]')
+
+            # Then any fps - prioritize video-only
+            components.append(f'bv*[vcodec*={codec}][height>={res}][height<={res}]')
+            if not video_only:
+                components.append(f'b[vcodec*={codec}][height>={res}][height<={res}]')
+
+    # Fallback to any codec at each resolution - prioritize video-only
+    for res in resolutions:
+        components.append(f"bv*[fps>=60][height>={res}][height<={res}]")
+        components.append(f"bv*[height>={res}][height<={res}]")
+        if not video_only:
+            components.append(f"b[fps>=60][height>={res}][height<={res}]")
+            components.append(f"b[height>={res}][height<={res}]")
+
+    # Final fallbacks for edge cases - prioritize video-only
+    components.append(f'bv*[vcodec~="{vcodec_regex}"][height>={H}]')  # Preferred codec, minimum height
+    components.append(f"bv*[height>={H}]")  # Any codec, minimum height
+    components.append(f'bv*[vcodec~="{vcodec_regex}"]')  # Preferred codec, any resolution
+    components.append("bv*")  # Any video-only stream
+
+    if not video_only:
+        components.append(f'b[vcodec~="{vcodec_regex}"][height>={H}]')  # Preferred codec, minimum height
+        components.append(f"b[height>={H}]")  # Any codec, minimum height
+        components.append(f'b[vcodec~="{vcodec_regex}"]')  # Preferred codec, any resolution
+        components.append("b")  # Any combined stream
+
+    format_expr = "/".join(components)
+
+    # Don't use format_sort - let the format selector handle priority via ordering
+    return format_expr, None
+
+
 
 class MediaUnavailableError(Exception):
     """Raised when a media source is temporarily unavailable (HTTP errors, network issues, etc.)."""
@@ -20,35 +120,57 @@ class MediaUnavailableError(Exception):
         self.original_error = original_error
 
 
-async def resolve_stream_url_async(src_url: str) -> Tuple[str, Dict[str, str]]:
+async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], hw_mode: Optional[str] = None) -> Tuple[str, Dict[str, str]]:
     """
     Async version of YouTube URL resolution.
     Resolve YouTube (and similar) page URLs into a direct media URL + HTTP headers
     suitable for av.open(..., options={ 'headers': 'K: V\\r\\n...' }).
     Non-YouTube URLs are returned unchanged.
+
+    Args:
+        src_url: Source URL to resolve
+        target_size: Target (width, height) for optimal format selection
+        hw_mode: Hardware acceleration mode for codec preference
     """
     if not is_youtube_url(src_url):
         return src_url, {}
 
-    # Accept any available format - FFmpeg can process almost anything
-    # Prefer video-only streams up to 1080p, fallback to combined streams
+    logger = logging.getLogger('sources')
+
+    # Build optimized format selector based on target size and hardware
+    if not target_size or len(target_size) != 2:
+        raise ValueError("target_size must be provided as (width, height) tuple")
+
+    format_expr, _ = build_yt_dlp_format(target_size[0], target_size[1], hw_mode, video_only=True)
+    logger.info(f"YouTube format selection for {target_size[0]}x{target_size[1]}, hw={hw_mode}")
+    logger.debug(f"Format expression: {format_expr}")
+
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "extract_flat": False,
-        "format": (
-            "bv[height<=720][vcodec!=none]/"
-            "best[height<=720][vcodec!=none]/"
-            "bv[vcodec!=none]/best[vcodec!=none]"
-        ),
+        "format": format_expr,
     }
+
+    # Debug: List available formats if debug logging is enabled
+    if logger.isEnabledFor(logging.DEBUG) and target_size:
+        logger.debug("Listing available formats for debugging...")
+        debug_opts = {
+            "quiet": False,
+            "listformats": True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(debug_opts) as debug_ydl:
+                debug_ydl.extract_info(src_url, download=False)
+        except Exception:
+            pass  # Don't fail if debug listing fails
 
     # Run the blocking yt-dlp operation in a thread pool
     loop = asyncio.get_event_loop()
     
     def _extract_info():
-        
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(src_url, download=False)
             if info is None:
@@ -56,6 +178,32 @@ async def resolve_stream_url_async(src_url: str) -> Tuple[str, Dict[str, str]]:
             if "entries" in info and info["entries"]:
                 info = info["entries"][0]
             media_url = info.get("url") or src_url
+
+            # Log selected format details for debugging
+            if target_size:
+                format_id = info.get("format_id", "unknown")
+                resolution = f"{info.get('width', '?')}x{info.get('height', '?')}"
+                fps = info.get("fps", "?")
+                vcodec = info.get("vcodec", "?")
+                filesize = info.get("filesize") or info.get("filesize_approx")
+                size_mb = f"{filesize / 1024 / 1024:.1f}MB" if filesize else "?MB"
+                logger.info(f"Selected format {format_id}: {resolution} @ {fps}fps, {vcodec}, ~{size_mb}")
+
+                # Show codec optimization results if debug logging enabled
+                if logger.isEnabledFor(logging.DEBUG):
+                    if "formats" in info and isinstance(info["formats"], list):
+                        matching_res = [f for f in info["formats"]
+                                      if f.get("height") == info.get("height")]
+                        if matching_res:
+                            logger.debug(f"Alternative codecs at {info.get('height')}p:")
+                            for f in matching_res[:3]:
+                                codec = f.get("vcodec", "unknown")
+                                logger.debug(f"  {f.get('format_id')}: {codec}")
+
+                        av1_available = any(f.get("vcodec", "").find("av01") >= 0
+                                          for f in info["formats"])
+                        logger.debug(f"AV1 available: {av1_available}, Selected: {vcodec}")
+
             headers = {}
             rh = info.get("http_headers") or {}
             if not rh and "formats" in info and isinstance(info["formats"], list):
@@ -97,8 +245,8 @@ class MediaSource:
         return f"MediaSource(original={self.original_url!r}, resolved={self.resolved_url!r})"
 
 
-async def resolve_media_source(src: str) -> MediaSource:
+async def resolve_media_source(src: str, target_size: Tuple[int, int], hw_mode: Optional[str] = None) -> MediaSource:
     """Resolve a media source URL to a MediaSource object."""
     src_url = unquote(src)
-    resolved_url, options = await resolve_stream_url_async(src_url)
+    resolved_url, options = await resolve_stream_url_async(src_url, target_size, hw_mode)
     return MediaSource(src_url, resolved_url, options)
