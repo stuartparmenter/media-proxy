@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2025-09-25
+
+### Added
+- Add `youtube.60fps` config option to control 60fps format preference
+- Support `auto` option for image resizing method
+
+### Changed
+- Major refactor: Replace dictionary-based configuration with strongly-typed StreamOptions
+- Rework YouTube format selection algorithm to favor lower resolution when appropriate for target display size
+- Update README documentation
+
+### Fixed
+- Fix 60fps YouTube format selection logic
+
+## [0.3.4] - 2025-09-24
+
+### Added
+- Add ha-addon/build.yaml file to specify container build platforms
+
+### Changed
+- Remove armv7 architecture from container builds
+
+### Fixed
+- Rework YouTube format selection to favor lower resolution when possible
+
 ## [0.3.3] - 2025-09-24
 
 ### Added
@@ -126,7 +151,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Initial release from https://github.com/stuartparmenter/lvgl-ddp-stream
 
-[unreleased]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.1...HEAD
+[unreleased]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/stuartparmenter/media-proxy/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/stuartparmenter/media-proxy/compare/v0.1.0...v0.2.9
