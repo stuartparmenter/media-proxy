@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import asyncio
 import logging
-from .fields import ControlFields
+from ..utils.fields import ControlFields
 
 
 class ControlSession:
@@ -51,10 +51,13 @@ class ControlProtocol(ABC):
         stream_task = await self._create_stream_task(session, params)
         session.active_streams[out_id] = stream_task
 
+        # Get applied params for response
+        applied_params = ControlFields.extract_applied_params(params)
+
         await self.send_response(session, {
             "type": "ack",
             "out": out_id,
-            "applied": ControlFields.extract_applied_params(params)
+            "applied": applied_params
         })
         
     async def handle_stop_stream(self, session: ControlSession, params: Dict[str, Any]) -> None:
@@ -82,10 +85,13 @@ class ControlProtocol(ABC):
         stream_task = await self._create_stream_task(session, base_params)
         session.active_streams[out_id] = stream_task
 
+        # Get applied params for response
+        applied_params = ControlFields.extract_applied_params(updatable_params)
+
         await self.send_response(session, {
             "type": "ack",
             "out": out_id,
-            "applied": ControlFields.extract_applied_params(updatable_params)
+            "applied": applied_params
         })
         
     async def handle_ping(self, session: ControlSession, params: Dict[str, Any]) -> None:

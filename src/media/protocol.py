@@ -2,26 +2,18 @@
 # SPDX-License-Identifier: MIT
 
 from abc import ABC, abstractmethod
-from typing import Iterator, Tuple, Dict, Any, Optional
-from dataclasses import dataclass
+from typing import Iterator, Tuple, Dict, Any, TYPE_CHECKING
 
-
-@dataclass
-class FrameIteratorConfig:
-    """Configuration for frame iteration."""
-    size: Tuple[int, int]  # (width, height)
-    loop_video: bool = False
-    expand_mode: int = 0  # 0=auto, 1=auto_to_pc, 2=tv_to_pc
-    hw_prefer: Optional[str] = None  # Hardware acceleration preference
-    fit_mode: Optional[str] = None  # "pad" | "cover"
+if TYPE_CHECKING:
+    from ..streaming.options import StreamOptions
 
 
 class FrameIterator(ABC):
     """Abstract base class for frame iteration from various media sources."""
 
-    def __init__(self, src_url: str, config: FrameIteratorConfig):
+    def __init__(self, src_url: str, stream_options: 'StreamOptions'):
         self.src_url = src_url
-        self.config = config
+        self.stream_options = stream_options
 
     @abstractmethod
     def __iter__(self) -> Iterator[Tuple[bytes, float]]:
@@ -51,14 +43,14 @@ class FrameIteratorFactory:
         cls._iterators[name] = iterator_class
 
     @classmethod
-    def create(cls, src_url: str, config: FrameIteratorConfig) -> FrameIterator:
+    def create(cls, src_url: str, stream_options: 'StreamOptions') -> FrameIterator:
         """Create the appropriate frame iterator for the given source."""
         _ensure_iterators_registered()
 
         for name, iterator_class in cls._iterators.items():
             # Check compatibility without creating an instance
             if iterator_class.can_handle(src_url):
-                return iterator_class(src_url, config)
+                return iterator_class(src_url, stream_options)
 
         raise ValueError(f"No frame iterator available for source: {src_url}")
 

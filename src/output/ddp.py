@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, Iterator
 
 from .protocol import BufferedOutputProtocol, OutputProtocol, OutputTarget, FrameMetadata, OutputProtocolFactory
 from ..media.processing import rgb888_to_565_bytes
-from ..utils.helpers import normalize_pixel_format, compute_spacing_and_group
+from ..utils.helpers import compute_spacing_and_group
 from ..utils.metrics import PerformanceTracker
 from ..config import Config
 
@@ -57,9 +57,8 @@ class DDPSender(asyncio.DatagramProtocol):
             self.packets_sent += 1
 
 
-def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str = "rgb888") -> Iterator[bytes]:
+def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str) -> Iterator[bytes]:
     """Generate DDP packets for a frame."""
-    fmt = normalize_pixel_format(fmt)
     
     if fmt == "rgb888":
         pixcfg = DDP_PIXEL_CFG_RGB888
@@ -105,40 +104,37 @@ def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str = "
 class DDPOutput(BufferedOutputProtocol):
     """DDP output protocol implementation."""
     
-    def __init__(self, target: OutputTarget, config: Dict[str, Any]):
-        # Override max queue size from config
-        config_copy = config.copy()
-        config_copy["max_queue_size"] = config.get("max_queue_size", 4096)
-        super().__init__(target, config_copy)
-        
-        self.config_obj = Config()
+    def __init__(self, target: OutputTarget, stream_options):
+        super().__init__(target, stream_options)
+
         self.sender: Optional[DDPSender] = None
         self.transport: Optional[asyncio.DatagramTransport] = None
         self.socket: Optional[socket.socket] = None
         self.seq = 0
-        
-        # Performance tracking and logging configuration
-        self.log_metrics = config.get("log_metrics")
+
+        # Performance tracking and logging configuration from app config
+        app_config = Config()
+        self.log_metrics = app_config.get("log.metrics")
         self.tracker = PerformanceTracker(
-            log_interval_s=config.get("log_interval_s")
+            log_interval_s=app_config.get("log.rate_ms") / 1000.0
         )
-        
+
         # Frame format configuration
-        self.pixel_format = normalize_pixel_format(config.get("fmt", "rgb888"))
-        
+        self.pixel_format = stream_options.fmt
+
         # Packet spreading configuration
-        self.spread_enabled = bool(self.config_obj.get("net.spread_packets"))
-        self.spread_max_fps = int(self.config_obj.get("net.spread_max_fps"))
-        
+        self.spread_enabled = bool(app_config.get("net.spread_packets"))
+        self.spread_max_fps = int(app_config.get("net.spread_max_fps"))
+
         # Still frame resend configuration
-        self.still_resend_config = self.config_obj.get("playback_still", {})
+        self.still_resend_config = app_config.get("playback_still", {})
         self.last_frame_data: Optional[bytes] = None
         self.last_frame_seq: Optional[int] = None
         self.last_frame_was_still = False
 
         # Mode and pacing information for logging
-        self.mode = config.get("mode", "unknown")
-        self.pace_hz = config.get("pace_hz", 0)
+        self.mode = "pace" if stream_options.pace > 0 else "native"
+        self.pace_hz = stream_options.pace
 
         # Track target FPS for native mode
         self.last_delay_ms: Optional[float] = None
@@ -213,13 +209,6 @@ class DDPOutput(BufferedOutputProtocol):
 
         logging.getLogger('ddp').info(f"stopped output {self.target.output_id}")
 
-    async def configure(self, new_config: Dict[str, Any]) -> None:
-        """Update configuration."""
-        if "fmt" in new_config:
-            self.pixel_format = normalize_pixel_format(new_config["fmt"])
-            
-        # Update other configuration as needed
-        self.config.update(new_config)
         
     async def _send_frame_internal(self, frame_data: bytes, metadata: FrameMetadata) -> None:
         """Send a single frame via DDP."""
@@ -242,7 +231,7 @@ class DDPOutput(BufferedOutputProtocol):
                     
                 pkt_count = (payload_len + DDP_MAX_DATA - 1) // DDP_MAX_DATA
                 spacing_s, group_n = compute_spacing_and_group(
-                    pkt_count, metadata.delay_ms / 1000.0, self.config_obj.get()
+                    pkt_count, metadata.delay_ms / 1000.0
                 )
                 use_spreading = spacing_s is not None
         

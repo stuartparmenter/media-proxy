@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 
 from ..config import Config
 from ..utils.helpers import is_http_url
-from .protocol import FrameIterator, FrameIteratorConfig
+from .protocol import FrameIterator
 from .processing import resize_pad_to_rgb_bytes
 
 MIN_DELAY_MS = 10.0  # clamp very small frame delays
@@ -247,8 +247,8 @@ def _create_image_source(src_url: str) -> ImageSource:
 class PilFrameIterator(FrameIterator):
     """Frame iterator for static images and animated GIFs using PIL."""
 
-    def __init__(self, src_url: str, config: FrameIteratorConfig):
-        super().__init__(src_url, config)
+    def __init__(self, src_url: str, stream_options):
+        super().__init__(src_url, stream_options)
         self.img_source = None
 
     @classmethod
@@ -268,8 +268,8 @@ class PilFrameIterator(FrameIterator):
     def __iter__(self) -> Iterator[Tuple[bytes, float]]:
         """Iterate frames from static images or animated GIFs with proper disposal handling."""
         config = Config()
-        size = self.config.size
-        loop_video = self.config.loop_video
+        size = self.stream_options.size
+        loop_video = self.stream_options.loop
 
         # Default fallback delay (for images without timing info)
         default_delay_ms = 100.0  # 10 FPS

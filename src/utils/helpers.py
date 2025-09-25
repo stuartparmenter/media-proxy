@@ -86,48 +86,24 @@ def headers_dict_to_ffmpeg_opt(headers: Dict[str, str]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def parse_expand_mode(val, default) -> int:
-    """Parse expand mode configuration value."""
-    s = str(val if val is not None else default).lower()
-    if s in ("2", "force"):
-        return 2
-    if s in ("0", "false", "never"):
-        return 0
-    return 1  # auto
 
 
-def parse_hw_preference(val, default) -> Optional[str]:
-    """Parse hardware acceleration preference."""
-    s = (val if val is not None else default)
-    return None if str(s).lower() in ("none", "off", "cpu") else str(s)
-
-
-def parse_pace_hz(val) -> int:
-    """Parse and validate pace Hz value."""
-    try:
-        n = int(val or 0)
-    except Exception:
-        raise ValueError(f"pace must be integer Hz (got {val!r})")
-    if n < 0:
-        raise ValueError("pace must be >= 0")
-    return n
-
-
-def compute_spacing_and_group(pkt_count: int, frame_interval_s: float, config: Dict) -> Tuple[Optional[float], int]:
+def compute_spacing_and_group(pkt_count: int, frame_interval_s: float) -> Tuple[Optional[float], int]:
     """
     Compute (spacing_s, group_n) for packet spreading.
-    
+
     spacing_s: sleep between packet *groups* (None => no spreading)
     group_n:   number of packets sent per timeslot (then sleep once)
     """
     import math
+    from ..config import Config
 
     if pkt_count <= 0 or frame_interval_s <= 0.0:
         return (None, 1)
 
-    net_cfg = config.get("net", {})
-    min_s = float(net_cfg.get("spread_min_ms")) / 1000.0
-    max_sleeps = int(net_cfg.get("spread_max_sleeps", 6))
+    config = Config()
+    min_s = float(config.get("net.spread_min_ms")) / 1000.0
+    max_sleeps = int(config.get("net.spread_max_sleeps", 6))
 
     # Ideal per-packet spacing if we slept once per packet
     ideal = frame_interval_s / float(pkt_count)
@@ -149,9 +125,3 @@ def compute_spacing_and_group(pkt_count: int, frame_interval_s: float, config: D
     return (spacing, group_n)
 
 
-def normalize_pixel_format(fmt_str: str) -> str:
-    """Normalize pixel format string."""
-    s = (fmt_str or "rgb888").strip().lower()
-    if s in ("rgb565", "565"):  # default to LE if unspecified
-        return "rgb565le"
-    return s

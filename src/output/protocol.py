@@ -8,6 +8,8 @@ import asyncio
 import logging
 import time
 
+from ..streaming.options import StreamOptions
+
 
 @dataclass
 class FrameMetadata:
@@ -54,9 +56,9 @@ class OutputMetrics:
 class OutputProtocol(ABC):
     """Abstract base class for output protocols (DDP, MJPEG, H264, etc.)."""
     
-    def __init__(self, target: OutputTarget, config: Dict[str, Any]):
+    def __init__(self, target: OutputTarget, stream_options: StreamOptions):
         self.target = target
-        self.config = config
+        self.stream_options = stream_options
         self.metrics = OutputMetrics()
         self._running = False
         
@@ -75,10 +77,6 @@ class OutputProtocol(ABC):
         """Send a frame to the output destination."""
         pass
         
-    @abstractmethod
-    async def configure(self, new_config: Dict[str, Any]) -> None:
-        """Update configuration on the fly."""
-        pass
         
     @property
     def is_running(self) -> bool:
@@ -97,11 +95,11 @@ class OutputProtocol(ABC):
 class BufferedOutputProtocol(OutputProtocol):
     """Base class for output protocols that use internal buffering/queuing."""
     
-    def __init__(self, target: OutputTarget, config: Dict[str, Any]):
-        super().__init__(target, config)
+    def __init__(self, target: OutputTarget, stream_options: StreamOptions):
+        super().__init__(target, stream_options)
         self._queue: Optional[asyncio.Queue] = None
         self._worker_task: Optional[asyncio.Task] = None
-        self._max_queue_size = config.get("max_queue_size", 4096)
+        self._max_queue_size = 4096  # Default output queue size
         
     async def start(self) -> None:
         """Start the buffered output with worker task."""
@@ -227,13 +225,13 @@ class OutputProtocolFactory:
         cls._protocols[protocol_name] = protocol_class
         
     @classmethod
-    def create(cls, target: OutputTarget, config: Dict[str, Any]) -> OutputProtocol:
+    def create(cls, target: OutputTarget, stream_options: StreamOptions) -> OutputProtocol:
         """Create an output protocol instance."""
         protocol_class = cls._protocols.get(target.protocol)
         if not protocol_class:
             raise ValueError(f"Unknown output protocol: {target.protocol}")
             
-        return protocol_class(target, config)
+        return protocol_class(target, stream_options)
         
     @classmethod
     def list_protocols(cls) -> list[str]:

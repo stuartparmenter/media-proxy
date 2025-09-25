@@ -245,8 +245,8 @@ class MediaSource:
         return f"MediaSource(original={self.original_url!r}, resolved={self.resolved_url!r})"
 
 
-async def resolve_media_source(src: str, target_size: Tuple[int, int], hw_mode: Optional[str] = None) -> MediaSource:
+async def resolve_media_source(src: str, stream_options) -> MediaSource:
     """Resolve a media source URL to a MediaSource object."""
     src_url = unquote(src)
-    resolved_url, options = await resolve_stream_url_async(src_url, target_size, hw_mode)
+    resolved_url, options = await resolve_stream_url_async(src_url, stream_options.size, stream_options.hw)
     return MediaSource(src_url, resolved_url, options)

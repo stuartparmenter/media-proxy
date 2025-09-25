@@ -10,37 +10,25 @@ from urllib.parse import unquote
 import urllib.error
 import av.error
 import yt_dlp
-from .config import Config
+from ..config import Config
 
-from .control.fields import ControlFields
-from .media.sources import resolve_media_source, MediaUnavailableError
-from .media.protocol import FrameIteratorFactory, FrameIteratorConfig
-from .media.images import cleanup_active_image_sources
-from .output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata
-from .utils.helpers import (
-    resolve_local_path, is_http_url, probe_http_content_type,
-    parse_expand_mode, parse_hw_preference, parse_pace_hz, truthy, is_youtube_url,
-    normalize_pixel_format
-)
-from .utils.hardware import pick_hw_backend
+from ..utils.fields import ControlFields
+from .options import StreamOptions
+from ..media.sources import resolve_media_source, MediaUnavailableError
+from ..media.protocol import FrameIteratorFactory
+from ..media.images import cleanup_active_image_sources
+from ..output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata
+from ..utils.helpers import is_youtube_url
 
 
 # Removed _get_gif_fps_from_pyav - PIL handles GIF timing directly
 
 
-async def stream_frames(
-    src: str,
-    size: Tuple[int, int],
-    loop_video: bool = True,
-    *,
-    expand_mode: int,
-    hw_prefer: str = None,
-    fit_mode: str = None
-) -> AsyncIterator[Tuple[bytes, float]]:
+async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[bytes, float]]:
     """
     Stream frames from a media source with automatic retry and error recovery.
     """
-    src_url = unquote(src)
+    src_url = unquote(stream_options.source)
     original_src = src_url
     max_retries = 3
     retry_count = 0
@@ -50,7 +38,7 @@ async def stream_frames(
             # For YouTube URLs, resolve to get actual stream URL and options
             if is_youtube_url(src_url):
                 try:
-                    source = await resolve_media_source(src_url, size, hw_prefer)
+                    source = await resolve_media_source(src_url, stream_options)
                     resolved_url = source.resolved_url
                     # Check if resolution actually succeeded (resolved URL should be different)
                     if resolved_url == src_url:
@@ -71,17 +59,8 @@ async def stream_frames(
             else:
                 resolved_url = src_url
 
-            # Create frame iterator configuration
-            config = FrameIteratorConfig(
-                size=size,
-                loop_video=loop_video,
-                expand_mode=expand_mode,
-                hw_prefer=hw_prefer,
-                fit_mode=fit_mode
-            )
-
             # Use the factory to create the appropriate iterator
-            iterator = FrameIteratorFactory.create(src_url, config)
+            iterator = FrameIteratorFactory.create(src_url, stream_options)
 
             # If this is a PyAV iterator and we have a resolved URL, update it
             if hasattr(iterator, 'real_src_url') and is_youtube_url(src_url):
@@ -97,7 +76,7 @@ async def stream_frames(
                 yield rgb888, delay_ms
 
             # If we get here without exception and we're looping, continue the loop
-            if not loop_video:
+            if not stream_options.loop:
                 break
 
 
@@ -131,7 +110,7 @@ async def stream_frames(
             # Other errors are not retryable
             raise RuntimeError(f"Frame iteration error: {e}") from e
 
-        if not loop_video:
+        if not stream_options.loop:
             break
 
 
@@ -139,83 +118,20 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
     """Create a streaming task that connects media input to output."""
     config = Config()
 
-    # Extract parameters using ControlFields for consistency
-    output_id = int(params["out"])
-    width = int(params["w"])
-    height = int(params["h"])
-    src = str(params["src"])
-    ddp_port = int(params.get("ddp_port", 4048))
+    # Create strongly typed streaming options from control parameters
+    stream_options = StreamOptions.from_control_params(params, config)
 
-    # Parse options using field-aware helpers
-    opts = {}
+    # Set network target from session
+    stream_options.target_ip = session.client_ip
 
-    # Copy validated parameters directly - fields.py has already validated them
-    # Map field names to internal option names
-    opts = {}
-    field_to_opts_mapping = {
-        "loop": "loop",
-        "expand": "expand_mode",
-        "hw": "hw",
-        "pace": "pace_hz",
-        "ema": "ema_alpha",
-        "fmt": "fmt",
-        "fit": "fit_mode"
-    }
-
-    for field_name, value in params.items():
-        if field_name in field_to_opts_mapping:
-            opts_key = field_to_opts_mapping[field_name]
-
-            # Apply minimal necessary transformations
-            if field_name == "loop":
-                opts[opts_key] = truthy(str(value)) if value is not None else None
-            elif field_name == "ema":
-                opts[opts_key] = max(0.0, min(float(value), 1.0)) if value is not None else None
-            elif field_name == "fmt":
-                opts[opts_key] = normalize_pixel_format(str(value)) if value is not None else None
-            else:
-                opts[opts_key] = value
-
-    # Set defaults for any missing options
-    if "loop" not in opts:
-        opts["loop"] = config.get("playback.loop")
-    if "expand_mode" not in opts:
-        opts["expand_mode"] = config.get("video.expand_mode")
-    if "hw" not in opts:
-        opts["hw"] = config.get("hw.prefer")
-    if "pace_hz" not in opts:
-        opts["pace_hz"] = 0
-    if "ema_alpha" not in opts:
-        opts["ema_alpha"] = 0.0
-    if "fmt" not in opts:
-        opts["fmt"] = normalize_pixel_format("rgb888")
-    if "fit_mode" not in opts:
-        opts["fit_mode"] = config.get("video.fit")
-
-    # Resolve hardware backend for format optimization and decode
-    if opts.get("hw") == "auto":
-        resolved_hw_backend = pick_hw_backend("auto")
-        opts["hw"] = resolved_hw_backend
-        logging.getLogger('streaming').debug(f"Resolved hw=auto to hw={resolved_hw_backend}")
-
-    # Note: Local file validation is handled during frame iteration
-
-    logging.getLogger('streaming').info(f"start_stream {session.client_ip} dev={session.device_id} out={output_id} "
-          f"size={width}x{height} ddp_port={ddp_port} src={src} "
-          f"pace={opts['pace_hz']} ema={opts['ema_alpha']} expand={opts['expand_mode']} "
-          f"loop={opts['loop']} hw={opts['hw']} fmt={opts['fmt']} fit={opts['fit_mode']}")
+    # Log the streaming options
+    stream_options.log_info(f"{session.client_ip} dev={session.device_id}")
 
     # Create the streaming task
-    task = asyncio.create_task(
-        streaming_task(
-            target_ip=session.client_ip,
-            target_port=ddp_port,
-            output_id=output_id,
-            size=(width, height),
-            src=src,
-            opts=opts
-        )
-    )
+    task = asyncio.create_task(streaming_task(stream_options))
+
+    # Attach the streaming options to the task for the control layer to access
+    task.stream_options = stream_options
 
     def on_done(t: asyncio.Task):
         try:
@@ -223,48 +139,38 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
         except asyncio.CancelledError:
             return
         except Exception as e:
-            logging.getLogger('streaming').error(f"out={output_id} exception(): {e!r}")
+            logging.getLogger('streaming').error(f"out={stream_options.output_id} exception(): {e!r}")
             return
         if exc:
-            logging.getLogger('streaming').error(f"out={output_id} crashed: {exc!r}")
+            logging.getLogger('streaming').error(f"out={stream_options.output_id} crashed: {exc!r}")
     task.add_done_callback(on_done)
 
     return task
 
 
-async def streaming_task(target_ip: str, target_port: int, output_id: int, *, 
-                        size: Tuple[int, int], src: str, opts: Dict[str, Any]):
+async def streaming_task(stream_options: StreamOptions):
     """Main streaming task that orchestrates media input -> processing -> output."""
     config = Config()
-    
+
     # Create output target and protocol
     target = OutputTarget(
-        host=target_ip,
-        port=target_port,
-        output_id=output_id,
+        host=stream_options.target_ip,
+        port=stream_options.ddp_port,
+        output_id=stream_options.output_id,
         protocol="ddp"
     )
 
-    output_config = {
-        "fmt": opts["fmt"],
-        "log_interval_s": config.get("log.rate_ms") / 1000.0,
-        "log_metrics": config.get("log.metrics"),
-        "max_queue_size": 4096,
-        "mode": "pace" if opts["pace_hz"] > 0 else "native",
-        "pace_hz": opts["pace_hz"],
-    }
-
-    output = OutputProtocolFactory.create(target, output_config)
+    output = OutputProtocolFactory.create(target, stream_options)
 
     try:
         await output.start()
 
-        if opts["pace_hz"] > 0:
+        if stream_options.pace > 0:
             # Paced mode: producer + sampler
-            await _run_paced_streaming(output, size, src, opts)
+            await _run_paced_streaming(output, stream_options)
         else:
             # Native cadence mode
-            await _run_native_streaming(output, size, src, opts)
+            await _run_native_streaming(output, stream_options)
 
     except MediaUnavailableError as e:
         # Media source unavailable (HTTP/network errors) - stop this stream task
@@ -280,7 +186,7 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
         return
     finally:
         # For non-looping content, ensure all packets are fully sent
-        if not opts["loop"] and hasattr(output, 'flush_and_stop'):
+        if not stream_options.loop and hasattr(output, 'flush_and_stop'):
             await output.flush_and_stop()
         else:
             await output.stop()
@@ -288,29 +194,22 @@ async def streaming_task(target_ip: str, target_port: int, output_id: int, *,
         cleanup_active_image_sources()
 
 
-async def _run_native_streaming(output, size: Tuple[int, int], src: str,
-                               opts: Dict[str, Any]):
+async def _run_native_streaming(output, stream_options: StreamOptions):
     """Run streaming at native source cadence."""
     frames_emitted = 0
     seq = 0
     next_frame_time = asyncio.get_event_loop().time()
 
-    async for rgb888, delay_ms in stream_frames(
-        src, size,
-        loop_video=opts["loop"],
-        expand_mode=opts["expand_mode"],
-        hw_prefer=opts["hw"],
-        fit_mode=opts["fit_mode"]
-    ):
+    async for rgb888, delay_ms in stream_frames(stream_options):
         # Create frame metadata
         metadata = FrameMetadata(
             sequence=seq,
             timestamp_ms=asyncio.get_event_loop().time() * 1000,
             delay_ms=delay_ms,
-            size=size,
-            format=opts["fmt"],
-            is_still=(not opts["loop"] and frames_emitted == 0),
-            is_last_frame=(not opts["loop"] and frames_emitted == 0)
+            size=stream_options.size,
+            format=stream_options.fmt,
+            is_still=(not stream_options.loop and frames_emitted == 0),
+            is_last_frame=(not stream_options.loop and frames_emitted == 0)
         )
 
         # Send frame
@@ -332,45 +231,38 @@ async def _run_native_streaming(output, size: Tuple[int, int], src: str,
 
 
 
-async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
-                              opts: Dict[str, Any]):
+async def _run_paced_streaming(output, stream_options: StreamOptions):
     """Run streaming with fixed pacing (producer + sampler pattern)."""
     import numpy as np
-    
-    pace_hz = opts["pace_hz"]
-    ema_alpha = opts["ema_alpha"]
-    
+
+    pace_hz = stream_options.pace
+    ema_alpha = stream_options.ema
+
     # Shared state
     latest_frame: Dict[str, bytes] = {"data": None}
     latest_lock = asyncio.Lock()
-    
+
     # Producer task
     async def producer():
-        async for rgb888, delay_ms in stream_frames(
-            src, size,
-            loop_video=opts["loop"],
-            expand_mode=opts["expand_mode"],
-            hw_prefer=opts["hw"],
-            fit_mode=opts["fit_mode"]
-        ):
+        async for rgb888, delay_ms in stream_frames(stream_options):
             async with latest_lock:
                 latest_frame["data"] = rgb888
 
             # Respect source timing for producer
             await asyncio.sleep(max(0.01, delay_ms / 1000.0))
-    
-    # Sampler task  
+
+    # Sampler task
     async def sampler():
         tick = 1.0 / pace_hz
         next_time = asyncio.get_event_loop().time()
         ema_buf_f32: np.ndarray = None
         seq = 0
-        
+
         while True:
             frame_data = latest_frame["data"]
             if frame_data is not None:
                 output_data = frame_data
-                
+
                 # Apply EMA if configured
                 if ema_alpha > 0.0:
                     cur = np.frombuffer(frame_data, dtype=np.uint8)
@@ -380,28 +272,28 @@ async def _run_paced_streaming(output, size: Tuple[int, int], src: str,
                         ema_buf_f32 *= (1.0 - ema_alpha)
                         ema_buf_f32 += cur.astype(np.float32) * ema_alpha
                     output_data = ema_buf_f32.astype(np.uint8, copy=False).tobytes()
-                
+
                 # Create metadata
                 metadata = FrameMetadata(
                     sequence=seq,
                     timestamp_ms=asyncio.get_event_loop().time() * 1000,
                     delay_ms=tick * 1000,
-                    size=size,
-                    format=opts["fmt"]
+                    size=stream_options.size,
+                    format=stream_options.fmt
                 )
-                
+
                 # Send frame
                 await output.send_frame(output_data, metadata)
                 seq = (seq + 1) & 0xFF
-            
+
             # Wait for next tick
             await asyncio.sleep(max(0.0, next_time - asyncio.get_event_loop().time()))
             next_time += tick
-    
+
     # Run both tasks concurrently
     producer_task = asyncio.create_task(producer())
     sampler_task = asyncio.create_task(sampler())
-    
+
     try:
         await producer_task
     finally:

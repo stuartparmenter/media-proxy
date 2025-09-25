@@ -5,7 +5,7 @@
 
 from .sources import resolve_media_source, MediaSource, MediaUnavailableError
 # Protocol-based frame iteration
-from .protocol import FrameIterator, FrameIteratorConfig, FrameIteratorFactory
+from .protocol import FrameIterator, FrameIteratorFactory
 from .images import PilFrameIterator
 from .video import PyAvFrameIterator
 from .processing import resize_pad_to_rgb_bytes, rgb888_to_565_bytes
@@ -14,7 +14,7 @@ __all__ = [
     # Sources
     "resolve_media_source", "MediaSource", "MediaUnavailableError",
     # Frame iteration (protocol-based)
-    "FrameIterator", "FrameIteratorConfig", "FrameIteratorFactory",
+    "FrameIterator", "FrameIteratorFactory",
     "PilFrameIterator", "PyAvFrameIterator",
     # Processing
     "resize_pad_to_rgb_bytes", "rgb888_to_565_bytes"

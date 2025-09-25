@@ -4,7 +4,7 @@
 """Control protocol implementations for managing streaming sessions."""
 
 from .protocol import ControlProtocol, ControlSession
-from .fields import ControlFields
+from ..utils.fields import ControlFields
 from .websocket import WebSocketControlProtocol, start_websocket_server
 
 __all__ = [

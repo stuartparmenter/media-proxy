@@ -11,7 +11,6 @@ from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, Connecti
 
 from .protocol import ControlProtocol, ControlSession
 from ..streaming import create_streaming_task
-from ..utils.helpers import truthy
 
 
 def is_benign_disconnect(exc: BaseException) -> bool:

@@ -9,7 +9,7 @@ import av
 from av.filter import Graph as AvFilterGraph
 
 from ..config import Config
-from .protocol import FrameIterator, FrameIteratorConfig
+from .protocol import FrameIterator
 
 MIN_DELAY_MS = 10.0
 
@@ -151,8 +151,8 @@ def estimate_black_bars(frame_w: int, frame_h: int, gray: np.ndarray,
 class PyAvFrameIterator(FrameIterator):
     """Frame iterator for video files using PyAV."""
 
-    def __init__(self, src_url: str, config: FrameIteratorConfig):
-        super().__init__(src_url, config)
+    def __init__(self, src_url: str, stream_options):
+        super().__init__(src_url, stream_options)
         self.real_src_url = src_url  # May be updated for YouTube URLs
         self.http_opts = {}  # May be updated for YouTube URLs
 
@@ -212,7 +212,7 @@ class PyAvFrameIterator(FrameIterator):
 
         # Implement the PyAV iteration directly in the protocol class
         config = Config()
-        TW, TH = self.config.size
+        TW, TH = self.stream_options.size
 
         # Auto-crop (black bar) config/state
         ac_cfg = config.get("video.autocrop", {})
@@ -234,7 +234,7 @@ class PyAvFrameIterator(FrameIterator):
         first_graph_log_done = False
 
         try:
-            container, vstream = open_stream(self.real_src_url, self.config.hw_prefer, options=self.http_opts)
+            container, vstream = open_stream(self.real_src_url, self.stream_options.hw, options=self.http_opts)
             if vstream is None:
                 raise RuntimeError("no video stream")
 
@@ -345,13 +345,13 @@ class PyAvFrameIterator(FrameIterator):
 
                 # expand TV->PC range before final downscale if requested
                 expand_args = ""
-                if self.config.expand_mode == 2:
+                if self.stream_options.expand == 2:
                     expand_args = ":in_range=tv:out_range=pc"
-                elif self.config.expand_mode == 1:
+                elif self.stream_options.expand == 1:
                     expand_args = ":in_range=auto:out_range=pc"
 
                 # Fit selection
-                fit_mode = str(config.get("video.fit")).lower()
+                fit_mode = self.stream_options.fit
                 if fit_mode == "cover":
                     n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear:force_original_aspect_ratio=increase" + expand_args)
                     last.link_to(n)
