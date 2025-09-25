@@ -27,6 +27,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         }
     },
     "playback": {"loop": True},
+    "youtube": {"60fps": True},
     # Still-image quality controls for tiny/low-DPI targets
     "image": {
         # method: lanczos | bicubic | bilinear | box | nearest

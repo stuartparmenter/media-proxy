@@ -8,6 +8,7 @@ from urllib.parse import unquote
 
 import yt_dlp
 
+from ..config import Config
 from ..utils.helpers import is_youtube_url, headers_dict_to_ffmpeg_opt
 
 
@@ -70,16 +71,22 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
 
     components = []
 
+    # Check config for 60fps preference
+    config = Config()
+    try_60fps = config.get("youtube.60fps", True)
+
+    # First, try 60fps at 720p regardless of target size (since 60fps is only available at 720p+)
+    if try_60fps:
+        for codec in codecs:
+            components.append(f'bv*[fps>=60][vcodec*={codec}][height>=720][height<=720]')
+            if not video_only:
+                components.append(f'b[fps>=60][vcodec*={codec}][height>=720][height<=720]')
+
     # Build codec-specific selectors for each resolution
     # This ensures explicit codec priority ordering
     for res in resolutions:
         # For each codec in preference order, add specific selectors
         for i, codec in enumerate(codecs):
-            # 60fps first - prioritize video-only
-            components.append(f'bv*[fps>=60][vcodec*={codec}][height>={res}][height<={res}]')
-            if not video_only:
-                components.append(f'b[fps>=60][vcodec*={codec}][height>={res}][height<={res}]')
-
             # Then any fps - prioritize video-only
             components.append(f'bv*[vcodec*={codec}][height>={res}][height<={res}]')
             if not video_only:
@@ -87,10 +94,8 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
 
     # Fallback to any codec at each resolution - prioritize video-only
     for res in resolutions:
-        components.append(f"bv*[fps>=60][height>={res}][height<={res}]")
         components.append(f"bv*[height>={res}][height<={res}]")
         if not video_only:
-            components.append(f"b[fps>=60][height>={res}][height<={res}]")
             components.append(f"b[height>={res}][height<={res}]")
 
     # Final fallbacks for edge cases - prioritize video-only
