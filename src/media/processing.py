@@ -114,7 +114,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
     scale = min(w / src_w, h / src_h) if src_w and src_h else 1.0
 
     # LED display optimized resampling strategy
-    if method_s not in METHOD_MAP:
+    if method_s == "auto" or method_s not in METHOD_MAP:
         # Auto-select based on scale for LED displays
         if scale >= 1.0:
             # Upscaling: use nearest to preserve pixel boundaries
@@ -134,7 +134,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
             # Heavy downscaling: use box to avoid aliasing
             resample = M.BOX
     else:
-        resample = METHOD_MAP.get(method_s, M.NEAREST)
+        resample = METHOD_MAP[method_s]
 
     # Check if this is a paletted image that we can preserve
     is_paletted = img.mode == 'P'
