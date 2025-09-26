@@ -37,7 +37,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         # Convert embedded ICC profiles to sRGB for consistent color
         "color_correction": True,
         # Optional mild sharpen after resize (0 disables)
-        "unsharp": {"amount": 0.0, "radius": 0.6, "threshold": 2}
+        "unsharp": {"amount": 0.0, "radius": 0.6, "threshold": 2},
+        # Frame caching for animated GIFs with loop=true
+        "frame_cache_mb": 32,  # Max memory for cached frames (0 = disabled)
+        "frame_cache_min_frames": 5  # Only cache if animation has >= N frames
     },
     "log": {
         "send_ms": False,
@@ -50,7 +53,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "spread_packets": True,
         "spread_max_fps": 60,
         "spread_min_ms": 3.0,
-        "spread_max_sleeps": 0
+        "spread_max_sleeps": 0,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
     },
     # Optional resend policy for single-frame (non-looping) stills over UDP.
     "playback_still": {

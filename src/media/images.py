@@ -3,7 +3,7 @@
 
 import numpy as np
 from PIL import Image
-from typing import Iterator, Tuple
+from typing import Iterator, Tuple, Dict, List
 import urllib.request
 from io import BytesIO
 import tempfile
@@ -12,9 +12,11 @@ import weakref
 import atexit
 import logging
 from abc import ABC, abstractmethod
+import hashlib
 
 from ..config import Config
-from ..utils.helpers import is_http_url
+from ..utils.helpers import is_http_url, resolve_local_path
+from urllib.parse import urlparse
 from .protocol import FrameIterator
 from .processing import resize_pad_to_rgb_bytes
 
@@ -96,6 +98,7 @@ def _get_normalized_blend_mode(pil_img: Image.Image) -> int:
 
 # Global registry for cleanup tracking
 _active_image_sources = weakref.WeakSet()
+
 
 def _cleanup_all_sources():
     """Emergency cleanup function called on exit."""
@@ -191,34 +194,57 @@ class TempFileSource(ImageSource):
                 pass
 
 
-def _create_image_source(src_url: str) -> ImageSource:
-    """Create image source - BytesIO for small images, temp file for large ones."""
-    try:
-        if is_http_url(src_url):
-            try:
-                # Create request with proper headers to avoid 403 errors
-                req = urllib.request.Request(src_url)
-                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36')
-                with urllib.request.urlopen(req) as response:
-                    # Check content length if available
-                    content_length = response.headers.get('Content-Length')
-                    if content_length:
-                        size = int(content_length)
-                        if size > MAX_SIZE_LIMIT:
-                            raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
+class LocalFileSource(ImageSource):
+    """Image source that directly uses a local file without copying."""
 
-                    data = response.read()
-            except (urllib.error.HTTPError, urllib.error.URLError):
-                # Re-raise HTTP/network errors for upstream handling
-                raise
-        else:
-            # Local file
-            file_size = os.path.getsize(src_url)
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        self._cleaned = False
+        # Register for cleanup tracking
+        _active_image_sources.add(self)
+
+    def open_image(self) -> Image.Image:
+        if self._cleaned:
+            raise RuntimeError("Attempted to use cleaned up ImageSource")
+        return Image.open(self.file_path)
+
+    def cleanup(self) -> None:
+        if self._cleaned:
+            return
+        self._cleaned = True
+        # Remove from tracking (weakref will handle this automatically too)
+        try:
+            _active_image_sources.discard(self)
+        except:
+            pass
+
+
+def _create_image_source(src_url: str) -> ImageSource:
+    """Create image source - optimized for local files, BytesIO for small remote images, temp file for large ones."""
+    try:
+        # For file:// URLs, use local file directly (no copying needed)
+        local_path = resolve_local_path(src_url)
+        if local_path:
+            # Check file size limit
+            file_size = os.path.getsize(local_path)
             if file_size > MAX_SIZE_LIMIT:
                 raise ValueError(f"Image too large: {_format_size_mb(file_size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
 
-            with open(src_url, 'rb') as f:
-                data = f.read()
+            return LocalFileSource(local_path)
+
+        # For HTTP/HTTPS URLs, download and use BytesIO or temp file
+        req = urllib.request.Request(src_url)
+        req.add_header('User-Agent', Config().get("net.user_agent"))
+
+        with urllib.request.urlopen(req) as response:
+            # Check content length if available
+            content_length = response.headers.get('Content-Length')
+            if content_length:
+                size = int(content_length)
+                if size > MAX_SIZE_LIMIT:
+                    raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
+
+            data = response.read()
 
         # Check actual size after download
         actual_size = len(data)
@@ -229,7 +255,7 @@ def _create_image_source(src_url: str) -> ImageSource:
         if actual_size <= MEMORY_THRESHOLD:
             return BytesIOSource(data)
 
-        # Use temp file for larger images
+        # Use temp file for larger downloaded images
         with tempfile.NamedTemporaryFile(suffix='.img', delete=False) as temp_file:
             temp_file.write(data)
             temp_path = temp_file.name
@@ -242,6 +268,15 @@ def _create_image_source(src_url: str) -> ImageSource:
         raise RuntimeError(f"Failed to create image source: {e}") from e
 
 
+def _get_display_name(src_url: str) -> str:
+    """Get a display name for a URL for logging."""
+    try:
+        parsed = urlparse(src_url)
+        path = parsed.path or '/'
+        filename = path.split('/')[-1]
+        return filename or parsed.netloc or src_url
+    except Exception:
+        return src_url[-50:] if len(src_url) > 50 else src_url
 
 
 class PilFrameIterator(FrameIterator):
@@ -250,6 +285,10 @@ class PilFrameIterator(FrameIterator):
     def __init__(self, src_url: str, stream_options):
         super().__init__(src_url, stream_options)
         self.img_source = None
+        self._frame_cache: Dict[str, List[Tuple[bytes, float]]] = {}
+        self._cache_memory_usage = 0
+        self._cache_stats = {"hits": 0, "misses": 0, "evictions": 0}
+        self._first_loop_complete = False
 
     @classmethod
     def can_handle(cls, src_url: str) -> bool:
@@ -264,6 +303,48 @@ class PilFrameIterator(FrameIterator):
             return any(path.endswith(ext) for ext in image_extensions)
         except Exception:
             return False
+
+    def _get_cache_key(self) -> str:
+        """Generate cache key based on source URL and stream options."""
+        options_hash = hashlib.md5()
+        options_hash.update(self.src_url.encode())
+        options_hash.update(str(self.stream_options.__dict__).encode())
+        return f"cache_{options_hash.hexdigest()[:16]}"
+
+    def _should_cache_frames(self, config: Config, n_frames: int, loop_video: bool) -> bool:
+        """Determine if frames should be cached based on config and animation properties."""
+        if not loop_video:
+            return False
+
+        cache_mb = config.get("image.frame_cache_mb", 32)
+        if cache_mb <= 0:
+            return False
+
+        min_frames = config.get("image.frame_cache_min_frames", 5)
+        return n_frames >= min_frames
+
+    def _estimate_frame_size(self, size: Tuple[int, int]) -> int:
+        """Estimate memory usage per frame in bytes (RGB format)."""
+        width, height = size
+        return width * height * 3  # RGB = 3 bytes per pixel
+
+    def _evict_cache_if_needed(self, config: Config, estimated_new_size: int) -> None:
+        """Evict cache entries if adding new frames would exceed memory limit."""
+        cache_limit_bytes = config.get("image.frame_cache_mb", 32) * 1024 * 1024
+
+        if self._cache_memory_usage + estimated_new_size <= cache_limit_bytes:
+            return
+
+        # Simple LRU: remove all entries for this source if we would exceed limit
+        # In a more sophisticated implementation, we could track access times
+        cache_key = self._get_cache_key()
+        if cache_key in self._frame_cache:
+            old_frames = self._frame_cache[cache_key]
+            old_size = len(old_frames) * self._estimate_frame_size(self.stream_options.size)
+            del self._frame_cache[cache_key]
+            self._cache_memory_usage -= old_size
+            self._cache_stats["evictions"] += 1
+            logging.getLogger('images').debug(f"evicted cache entry for {self.src_url} (saved {old_size} bytes)")
 
     def __iter__(self) -> Iterator[Tuple[bytes, float]]:
         """Iterate frames from static images or animated GIFs with proper disposal handling."""
@@ -305,14 +386,41 @@ class PilFrameIterator(FrameIterator):
                     if global_palette is not None and background_color < len(global_palette):
                         bg_rgb = tuple(global_palette[background_color])
 
+                # Cache setup
+                cache_key = self._get_cache_key()
+                should_cache = self._should_cache_frames(config, n_frames, loop_video)
+
                 # Main iteration loop
+                loop_count = 0
                 while True:
+                    loop_count += 1
+
+                    # Check cache on each loop iteration
+                    cached_frames = None
+                    if should_cache and cache_key in self._frame_cache:
+                        cached_frames = self._frame_cache[cache_key]
+                        self._cache_stats["hits"] += 1
+
                     saw_frame = False
+                    current_loop_frames = []  # Collect frames for caching on first loop
 
                     if is_animated:
-                        # For animated GIFs, we need to handle frame compositing properly
+                        if cached_frames:
+                            # Serve from cache
+                            for frame_data, delay in cached_frames:
+                                yield frame_data, delay
+                                saw_frame = True
+
+                            if not loop_video:
+                                break
+                            if not saw_frame:
+                                raise FileNotFoundError(f"cannot decode frames: {self.src_url}")
+                            continue  # Skip to next loop iteration
+
+                        # Process frames normally and cache if needed
                         canvas = None  # Current composite state
                         previous_canvas = None  # For disposal method 3
+                        self._cache_stats["misses"] += 1
 
                         # Iterate through all frames with proper disposal handling
                         for frame_idx in range(n_frames):
@@ -348,6 +456,11 @@ class PilFrameIterator(FrameIterator):
 
                             # Process the composite canvas for output
                             rgb888 = resize_pad_to_rgb_bytes(canvas, size, config)
+
+                            # Cache frame if we're on first loop and caching is enabled
+                            if should_cache and not self._first_loop_complete:
+                                current_loop_frames.append((rgb888, duration))
+
                             yield rgb888, duration
                             saw_frame = True
 
@@ -360,6 +473,20 @@ class PilFrameIterator(FrameIterator):
                                 if previous_canvas is not None:
                                     canvas = previous_canvas.copy()
                             # For DisposalMethod.NONE: do nothing (leave canvas as-is)
+
+                            # Cache frames after first complete loop
+                            if should_cache and not self._first_loop_complete and len(current_loop_frames) == n_frames:
+                                estimated_size = len(current_loop_frames) * self._estimate_frame_size(size)
+                                self._evict_cache_if_needed(config, estimated_size)
+
+                                self._frame_cache[cache_key] = current_loop_frames.copy()
+                                self._cache_memory_usage += estimated_size
+                                self._first_loop_complete = True
+
+                                logging.getLogger('images').info(
+                                    f"cached {len(current_loop_frames)} frames for {_get_display_name(self.src_url)} "
+                                    f"(~{estimated_size // 1024}KB, total cache: {self._cache_memory_usage // 1024}KB)"
+                                )
                     else:
                         # Static image - pass as-is to handle transparency
                         rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config)
@@ -387,3 +514,12 @@ class PilFrameIterator(FrameIterator):
         if self.img_source:
             self.img_source.cleanup()
             self.img_source = None
+
+        # Log cache statistics
+        stats = self._cache_stats
+        if any(stats.values()):
+            logging.getLogger('images').debug(
+                f"cache stats for {_get_display_name(self.src_url)}: "
+                f"hits={stats['hits']} misses={stats['misses']} evictions={stats['evictions']}"
+            )
+
