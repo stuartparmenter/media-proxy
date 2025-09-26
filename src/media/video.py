@@ -4,12 +4,15 @@
 import contextlib
 import logging
 import numpy as np
+import os
 from typing import Iterator, Tuple, Dict, Optional
 import av
+from av.codec.hwaccel import HWAccel
 from av.filter import Graph as AvFilterGraph
 
 from ..config import Config
 from .protocol import FrameIterator
+from ..utils.helpers import resolve_local_path
 
 MIN_DELAY_MS = 10.0
 
@@ -18,30 +21,28 @@ def open_stream(src_url: str, hw_backend: Optional[str], options: Optional[Dict[
     """Open media container with resolved hardware acceleration backend."""
     options = options or {}
 
+    # Convert file:// URLs to local paths for PyAV compatibility
+    local_path = resolve_local_path(src_url)
+    pyav_url = local_path if local_path else src_url
+
+    # For local files, check existence first to avoid misleading hwaccel errors
+    if local_path and not os.path.exists(local_path):
+        raise FileNotFoundError(f"cannot open media file: {src_url}")
+
     try:
-        if hw_backend:
-            try:
-                from av.codec.hwaccel import HWAccel
-            except Exception as ie:
-                raise RuntimeError(f"hwaccel API unavailable: {ie}")
-            container = av.open(src_url, mode="r", hwaccel=HWAccel(device_type=hw_backend), options=options)
-            logging.getLogger('video').info(f"selected {hw_backend} for decode")
-        else:
-            logging.getLogger('video').info("using CPU decode (no HW accel selected)")
-            container = av.open(src_url, mode="r", options=options)
-        
+        hwaccel = HWAccel(device_type=hw_backend) if hw_backend else None
+        container = av.open(pyav_url, mode="r", hwaccel=hwaccel, options=options)
         vstream = next((s for s in container.streams if s.type == "video"), None)
         if vstream is None:
             raise RuntimeError("no video stream")
         return container, vstream
-        
-    except Exception as e:
-        logging.getLogger('video').info(f"hwaccel disabled: {hw_backend} not available: {e}")
-        container = av.open(src_url, mode="r", options=options)
-        vstream = next((s for s in container.streams if s.type == "video"), None)
-        if vstream is None:
-            raise RuntimeError("no video stream")
-        return container, vstream
+
+    except OSError as e:
+        # Re-raise OS errors with original URL for better error messages
+        raise OSError(f"cannot open media file: {src_url}") from e
+    except av.error.FFmpegError as e:
+        # Re-raise FFmpeg errors with original URL
+        raise RuntimeError(f"FFmpeg error opening {src_url}: {e}") from e
 
 
 def rotation_from_stream_and_frame(vstream, frame) -> int:
