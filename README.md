@@ -73,6 +73,8 @@ image:
     amount: 0.0
     radius: 0.6
     threshold: 2
+  frame_cache_mb: 32    # Max memory for cached frames (0 = disabled)
+  frame_cache_min_frames: 5  # Only cache if animation has >= N frames
 
 log:
   level: info
@@ -117,6 +119,177 @@ Media Proxy intelligently selects YouTube formats based on your display size and
 - **CPU fallback:** H.264 → VP9 → H.265 (efficiency-focused)
 
 Enable `log.level: debug` to see format selection details.
+
+---
+
+## WebSocket Control API
+
+Media Proxy provides a WebSocket control API on `/control` (default port `:8788`) for managing video/image streams to devices.
+
+### Connection & Handshake
+
+1. **Connect** to `ws://localhost:8788/control`
+2. **Send handshake** message:
+```json
+{
+  "type": "hello",
+  "device_id": "my_device_123"
+}
+```
+3. **Receive acknowledgment**:
+```json
+{
+  "type": "hello_ack",
+  "server_version": "media-proxy/1.0"
+}
+```
+
+### Control Messages
+
+#### Start Stream
+```json
+{
+  "type": "start_stream",
+  "out": 5,
+  "w": 64,
+  "h": 64,
+  "src": "https://example.com/video.mp4",
+  "ddp_port": 4048,
+  "fit": "cover",
+  "loop": true,
+  "hw": "auto"
+}
+```
+
+**Required parameters:**
+- `out`: Output ID (integer ≥ 1)
+- `w`: Display width in pixels (integer > 0)
+- `h`: Display height in pixels (integer > 0)
+- `src`: Media source (file path, HTTP URL, or YouTube URL)
+
+**Optional parameters:**
+- `ddp_port`: DDP output port (default: 4048)
+- `fit`: Resize mode - `cover` or `pad` (default from config)
+- `loop`: Loop media playback (boolean, default from config)
+- `hw`: Hardware acceleration - `auto`, `none`, `cuda`, `qsv`, `vaapi`, `videotoolbox`, `d3d11va`
+- `fmt`: Pixel format - `rgb888`, `rgb565le`, `rgb565be` (default: `rgb888`)
+- `expand`: Color range expansion - `0` (never), `1` (auto), `2` (force)
+- `pace`: Frame pacing frequency in Hz (default: 0)
+- `ema`: EMA filter alpha (0.0-1.0, default: 0.0)
+
+#### Stop Stream
+```json
+{
+  "type": "stop_stream",
+  "out": 5
+}
+```
+
+#### Update Stream
+Updates an existing stream with new parameters (stops and restarts internally):
+```json
+{
+  "type": "update",
+  "out": 5,
+  "src": "https://example.com/new_video.mp4",
+  "loop": false
+}
+```
+
+### Error Responses
+```json
+{
+  "type": "error",
+  "code": "bad_request",
+  "message": "start requires Display width (missing: w)"
+}
+```
+
+**Error codes:**
+- `proto`: Protocol violation (invalid handshake, bad JSON)
+- `bad_type`: Unknown message type
+- `bad_request`: Missing/invalid parameters
+- `server_error`: Internal server error
+
+### Example JavaScript Client
+```javascript
+const ws = new WebSocket('ws://localhost:8788/control');
+
+ws.onopen = () => {
+  // Handshake
+  ws.send(JSON.stringify({
+    type: 'hello',
+    device_id: 'browser_client'
+  }));
+};
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'hello_ack') {
+    // Start streaming
+    ws.send(JSON.stringify({
+      type: 'start_stream',
+      out: 5,
+      w: 64,
+      h: 64,
+      src: 'https://media.giphy.com/media/3o6Zt481isNVuQI1l6/giphy.gif'
+    }));
+  }
+};
+```
+
+---
+
+## Convert API
+
+Media Proxy includes a utility API for converting video/animated content into ESPHome LVGL animimg format.
+
+### POST `/api/convert/animimg`
+
+Extracts frames from videos, GIFs, or images and packages them as a ZIP file optimized for ESPHome LVGL animimg widgets.
+
+**Request body (JSON):**
+```json
+{
+  "source": "https://example.com/video.mp4",
+  "width": 64,
+  "height": 64,
+  "frame_limit": 100,
+  "fps_limit": 10,
+  "fit": "cover"
+}
+```
+
+**Parameters:**
+- `source` *(required)*: URL or local path to video/image/GIF
+- `width` *(required)*: Target width in pixels
+- `height` *(required)*: Target height in pixels
+- `frame_limit` *(optional)*: Maximum frames to extract (default: 100)
+- `fps_limit` *(optional)*: Maximum FPS for output (default: source FPS)
+- `fit` *(optional)*: Resize mode - `cover` or `pad` (default: `cover`)
+
+**Response:** ZIP file containing:
+- Individual frame images (`frame_001.png`, `frame_002.png`, etc.)
+- `animimg_config.yaml` - ESPHome configuration template
+- `README.txt` - Integration instructions
+
+### Example Usage
+
+**Convert an animated GIF to ESPHome animimg format:**
+```bash
+curl -X POST http://localhost:8788/api/convert/animimg \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "https://upload.wikimedia.org/wikipedia/commons/2/2c/Rotating_earth_%28large%29.gif",
+    "width": 64,
+    "height": 64,
+    "frame_limit": 50,
+    "fit": "cover"
+  }' \
+  --output rotating_earth.zip
+```
+
+The resulting ZIP file contains individual PNG frames and an ESPHome configuration template ready for integration with LVGL animimg widgets.
 
 ---
 
