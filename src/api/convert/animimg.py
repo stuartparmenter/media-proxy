@@ -162,7 +162,7 @@ def create_animimg_zip(frames: List[Tuple[bytes, float]], width: int, height: in
             # Track for YAML config
             frame_files.append({
                 'file': filename,
-                'delay_ms': int(delay_ms)
+                'delay_ms': delay_ms  # Keep as float for precision
             })
 
         # Create ESPHome YAML configuration
@@ -193,9 +193,9 @@ def create_esphome_yaml_config(frame_files: List[Dict[str, Any]]) -> str:
             'type': 'RGB565'
         })
 
-    # Calculate average frame duration in ms
+    # Calculate total animation duration in ms
     total_duration_ms = sum(frame_info['delay_ms'] for frame_info in frame_files)
-    avg_duration_ms = int(total_duration_ms / len(frame_files)) if frame_files else 100
+    total_duration_ms = round(total_duration_ms) if frame_files else 100
 
     # Create ESPHome configuration
     config = {
@@ -209,7 +209,7 @@ def create_esphome_yaml_config(frame_files: List[Dict[str, Any]]) -> str:
                             'animimg': {
                                 'id': 'my_animation',
                                 'src': frame_ids,
-                                'duration': f"{avg_duration_ms}ms",
+                                'duration': f"{total_duration_ms}ms",
                                 'repeat_count': 'forever'
                             }
                         }
@@ -230,7 +230,6 @@ def create_esphome_yaml_config(frame_files: List[Dict[str, Any]]) -> str:
 # 4. Customize the animimg widget properties as needed
 #
 # Frames: {len(frame_files)}
-# Average frame duration: {avg_duration_ms}ms
 # Total animation duration: {total_duration_ms}ms
 
 """
