@@ -4,12 +4,8 @@
 import os
 from urllib.parse import urlparse, unquote
 from typing import Optional, Dict, Tuple
-import urllib.request as _urlreq
-
-try:
-    from urllib.request import url2pathname
-except Exception:  # pragma: no cover
-    def url2pathname(p): return p  # type: ignore[misc]
+import urllib.request
+from urllib.request import url2pathname
 
 
 def is_youtube_url(url: str) -> bool:
@@ -44,28 +40,6 @@ def resolve_local_path(src_url: str) -> Optional[str]:
     return None
 
 
-def truthy(s: str) -> bool:
-    """Check if a string represents a truthy value."""
-    return s.lower() not in ("0", "false", "no", "off", "")
-
-
-def probe_http_content_type(url: str, timeout: float = 3.0) -> Optional[str]:
-    """Try HEAD to get Content-Type. If server rejects HEAD, try a tiny GET with Range."""
-    if not is_http_url(url):
-        return None
-    try:
-        req = _urlreq.Request(url, method="HEAD")
-        with _urlreq.urlopen(req, timeout=timeout) as resp:
-            ct = resp.headers.get("Content-Type")
-            return (ct or "").split(";")[0].strip().lower() or None
-    except Exception:
-        try:
-            req = _urlreq.Request(url, method="GET", headers={"Range": "bytes=0-0"})
-            with _urlreq.urlopen(req, timeout=timeout) as resp:
-                ct = resp.headers.get("Content-Type")
-                return (ct or "").split(";")[0].strip().lower() or None
-        except Exception:
-            return None
 
 
 def headers_dict_to_ffmpeg_opt(headers: Dict[str, str]) -> str:
