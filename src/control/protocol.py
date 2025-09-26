@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, Tuple
 import asyncio
 import logging
 from ..utils.fields import ControlFields
+from .handlers import ControlHandlerRegistry
 
 
 class ControlSession:
@@ -45,14 +46,11 @@ class ControlProtocol(ABC):
 
         logging.getLogger('protocol').info(f"start_stream request: out={out_id} from session {session.client_id}")
 
-        # Create output protocol to get stream key and handle conflicts
+        # Get stream key using control handlers
+        stream_key = ControlHandlerRegistry.get_stream_key(session, params)
+
+        # Create output protocol and let it handle conflict resolution if needed
         output = self._create_output_protocol(params)
-        stream_key = output.get_stream_key(session, params)
-
-        # Stop existing stream for this key (session-level)
-        await self._stop_stream_internal(session, stream_key, output)
-
-        # Let output protocol handle conflict resolution if needed
         if stream_key is not None:
             await output.ensure_exclusive_access(stream_key)
 
@@ -78,11 +76,14 @@ class ControlProtocol(ABC):
         ControlFields.validate_fields(params, "stop")
         out_id = int(params["out"])
 
-        # Create output protocol to get stream key
-        output = self._create_output_protocol(params)
-        stream_key = output.get_stream_key(session, params)
+        logging.getLogger('protocol').info(f"stop_stream request: out={out_id} from session {session.client_id}")
 
-        await self._stop_stream_internal(session, stream_key, output)
+        # Get stream key using control handlers
+        stream_key = ControlHandlerRegistry.get_stream_key(session, params)
+
+        logging.getLogger('protocol').debug(f"stop_stream: stream_key={stream_key}, active_streams={list(session.active_streams.keys())}")
+
+        await self._stop_stream_internal(session, stream_key, None)
         await self.send_response(session, {"type": "ack", "out": out_id})
 
     async def handle_update_stream(self, session: ControlSession, params: Dict[str, Any]) -> None:
@@ -90,9 +91,11 @@ class ControlProtocol(ABC):
         ControlFields.validate_fields(params, "update")
         out_id = int(params["out"])
 
-        # Create output protocol to get stream key
+        # Get stream key using control handlers
+        stream_key = ControlHandlerRegistry.get_stream_key(session, params)
+
+        # Create output protocol for conflict resolution
         output = self._create_output_protocol(params)
-        stream_key = output.get_stream_key(session, params)
         session_key = stream_key if stream_key is not None else f"out_{out_id}"
 
         if session_key not in session.active_streams:
@@ -170,15 +173,21 @@ class ControlProtocol(ABC):
 
         return OutputProtocolFactory.create(target, stream_options)
 
+
     async def _stop_stream_internal(self, session: ControlSession, stream_key, output) -> None:
         """Internal method to stop a stream task."""
         session_key = stream_key if stream_key is not None else None
+        logging.getLogger('protocol').debug(f"_stop_stream_internal: session_key={session_key}, stream_key={stream_key}")
+
         if session_key is None:
             # Find by output_id for backwards compatibility
             # This is a fallback when stream_key is None
+            logging.getLogger('protocol').debug("_stop_stream_internal: session_key is None, returning early")
             return
 
         task = session.active_streams.pop(session_key, None)
+        logging.getLogger('protocol').debug(f"_stop_stream_internal: found task={task is not None}, done={task.done() if task else 'N/A'}")
+
         if task and not task.done():
             logging.getLogger('protocol').info(f"stopping session stream {session_key}")
             task.cancel()
@@ -190,5 +199,9 @@ class ControlProtocol(ABC):
                 logging.getLogger('protocol').error(f"stream cleanup error {session_key}: {e!r}")
 
             # Clean up with output protocol if possible
-            if stream_key is not None:
+            if stream_key is not None and output is not None:
                 await output.cleanup_stream(stream_key, task)
+        elif task is None:
+            logging.getLogger('protocol').debug(f"_stop_stream_internal: no task found for session_key={session_key}")
+        else:
+            logging.getLogger('protocol').debug(f"_stop_stream_internal: task already done for session_key={session_key}")
