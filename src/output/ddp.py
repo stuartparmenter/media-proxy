@@ -7,7 +7,7 @@ import socket
 import struct
 import time
 from collections import deque
-from typing import Dict, Any, Optional, Iterator
+from typing import Dict, Any, Optional, Iterator, Tuple
 
 from .protocol import BufferedOutputProtocol, OutputProtocol, OutputTarget, FrameMetadata, OutputProtocolFactory
 from ..media.processing import rgb888_to_565_bytes
@@ -103,7 +103,11 @@ def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str) ->
 
 class DDPOutput(BufferedOutputProtocol):
     """DDP output protocol implementation."""
-    
+
+    # Global stream registry - shared across all DDP instances for conflict resolution
+    _global_streams: Dict[Tuple[str, int], asyncio.Task] = {}  # (target_ip, out_id) -> task
+    _stream_locks: Dict[Tuple[str, int], asyncio.Lock] = {}    # Prevent race conditions
+
     def __init__(self, target: OutputTarget, stream_options):
         super().__init__(target, stream_options)
 
@@ -141,6 +145,74 @@ class DDPOutput(BufferedOutputProtocol):
 
         # Packet counters for logging
         self._packets_enqueued = 0
+
+    # Stream management interface implementation
+    def get_stream_key(self, session, params: Dict[str, Any]) -> Tuple[str, int]:
+        """DDP conflicts on (target_ip, output_id)"""
+        # TODO: Add support for explicit target_ip parameter in future
+        # For now, use the client IP as the target (existing behavior)
+        target_ip = session.client_ip
+        output_id = int(params["out"])
+        return (target_ip, output_id)
+
+    async def ensure_exclusive_access(self, stream_key: Tuple[str, int]) -> None:
+        """Ensure no conflicting streams exist globally across all DDP instances."""
+        target_ip, out_id = stream_key
+
+        # Get or create lock for this stream key
+        if stream_key not in DDPOutput._stream_locks:
+            DDPOutput._stream_locks[stream_key] = asyncio.Lock()
+            logging.getLogger('ddp').debug(f"created new lock for {target_ip}:{out_id}")
+
+        lock = DDPOutput._stream_locks[stream_key]
+        logging.getLogger('ddp').debug(f"acquiring lock for {target_ip}:{out_id}")
+        async with lock:
+            logging.getLogger('ddp').debug(f"lock acquired for {target_ip}:{out_id}, checking conflicts...")
+            await self._ensure_no_global_conflict_locked(stream_key)
+        logging.getLogger('ddp').debug(f"lock released for {target_ip}:{out_id}")
+
+    async def register_stream(self, stream_key: Tuple[str, int], task: asyncio.Task) -> None:
+        """Register DDP stream in global registry"""
+        target_ip, out_id = stream_key
+        DDPOutput._global_streams[stream_key] = task
+        logging.getLogger('ddp').debug(f"registered new stream task for {target_ip}:{out_id}")
+
+    async def cleanup_stream(self, stream_key: Tuple[str, int], task: asyncio.Task) -> None:
+        """Clean up DDP stream from global registry"""
+        target_ip, out_id = stream_key
+        # Only remove from global registry if we actually owned this stream
+        global_task = DDPOutput._global_streams.get(stream_key)
+        if global_task is task:
+            DDPOutput._global_streams.pop(stream_key, None)
+            logging.getLogger('ddp').debug(f"removed stream from global registry for {target_ip}:{out_id}")
+
+    async def _ensure_no_global_conflict_locked(self, stream_key: Tuple[str, int]) -> None:
+        """Ensure no conflicting streams exist globally. Assumes lock is already held."""
+        target_ip, out_id = stream_key
+
+        # Check for existing global stream
+        existing_task = DDPOutput._global_streams.get(stream_key)
+        logging.getLogger('ddp').debug(f"global conflict check for {target_ip}:{out_id}: existing_task={existing_task is not None}, done={existing_task.done() if existing_task else 'N/A'}")
+
+        if existing_task and not existing_task.done():
+            logging.getLogger('ddp').info(
+                f"stopping conflicting stream for {target_ip}:{out_id}"
+            )
+            existing_task.cancel()
+            try:
+                await existing_task
+                logging.getLogger('ddp').debug(f"conflicting stream cancelled successfully for {target_ip}:{out_id}")
+            except asyncio.CancelledError:
+                logging.getLogger('ddp').debug(f"conflicting stream cancellation completed for {target_ip}:{out_id}")
+            except Exception as e:
+                logging.getLogger('ddp').error(
+                    f"global stream cleanup error {target_ip}:{out_id}: {e!r}"
+                )
+            # Remove from global registry
+            DDPOutput._global_streams.pop(stream_key, None)
+            logging.getLogger('ddp').debug(f"removed conflicting stream from global registry for {target_ip}:{out_id}")
+        else:
+            logging.getLogger('ddp').debug(f"no conflicting stream found for {target_ip}:{out_id}")
         
     async def start(self) -> None:
         """Initialize UDP transport."""

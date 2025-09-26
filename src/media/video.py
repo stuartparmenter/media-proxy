@@ -36,7 +36,7 @@ def open_stream(src_url: str, hw_backend: Optional[str], options: Optional[Dict[
         return container, vstream
         
     except Exception as e:
-        logging.getLogger('video').info(f"hwaccel disabled: {kind or 'auto'} not available: {e}")
+        logging.getLogger('video').info(f"hwaccel disabled: {hw_backend} not available: {e}")
         container = av.open(src_url, mode="r", options=options)
         vstream = next((s for s in container.streams if s.type == "video"), None)
         if vstream is None:

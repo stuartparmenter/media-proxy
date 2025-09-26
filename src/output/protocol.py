@@ -55,26 +55,43 @@ class OutputMetrics:
 
 class OutputProtocol(ABC):
     """Abstract base class for output protocols (DDP, MJPEG, H264, etc.)."""
-    
+
     def __init__(self, target: OutputTarget, stream_options: StreamOptions):
         self.target = target
         self.stream_options = stream_options
         self.metrics = OutputMetrics()
         self._running = False
-        
+
     @abstractmethod
     async def start(self) -> None:
         """Initialize the output protocol and start any background tasks."""
         self._running = True
-        
+
     @abstractmethod
     async def stop(self) -> None:
         """Stop the output protocol and clean up resources."""
         self._running = False
-        
+
     @abstractmethod
     async def send_frame(self, frame_data: bytes, metadata: FrameMetadata) -> None:
         """Send a frame to the output destination."""
+        pass
+
+    # Stream management interface (optional for protocols that need conflict resolution)
+    def get_stream_key(self, session, params: Dict[str, Any]) -> Any:
+        """Generate stream key for conflict detection. Return None if no conflicts possible."""
+        return None  # Default: no conflicts
+
+    async def ensure_exclusive_access(self, stream_key: Any) -> None:
+        """Ensure exclusive access to the stream target. Default: no-op (no exclusivity needed)."""
+        pass
+
+    async def register_stream(self, stream_key: Any, task: 'asyncio.Task') -> None:
+        """Register an active stream. Default: no-op."""
+        pass
+
+    async def cleanup_stream(self, stream_key: Any, task: 'asyncio.Task') -> None:
+        """Clean up stream registration. Default: no-op."""
         pass
         
         

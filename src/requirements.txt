@@ -1,10 +1,10 @@
+aiohttp>=3.8,<4
 av>=15,<16
 numpy>=2,<3
 pillow>=10,<13
 imageio-ffmpeg>=0.6,<1
 psutil>=5,<8
 PyYAML>=6,<7
-websockets>=12,<16
 yt-dlp>=2024.10,<2026
 
 # TOML support for Python < 3.11

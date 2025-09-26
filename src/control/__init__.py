@@ -5,9 +5,9 @@
 
 from .protocol import ControlProtocol, ControlSession
 from ..utils.fields import ControlFields
-from .websocket import WebSocketControlProtocol, start_websocket_server
+from .websocket import WebSocketControlProtocol, websocket_handler
 
 __all__ = [
     "ControlProtocol", "ControlSession", "ControlFields",
-    "WebSocketControlProtocol", "start_websocket_server"
+    "WebSocketControlProtocol", "websocket_handler"
 ]
