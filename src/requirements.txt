@@ -5,7 +5,7 @@ pillow>=10,<13
 imageio-ffmpeg>=0.6,<1
 psutil>=5,<8
 PyYAML>=6,<7
-yt-dlp>=2024.10,<2026
+yt-dlp[default,curl-cffi]>=2025.9,<2026
 
 # TOML support for Python < 3.11
 tomli>=2,<3 ; python_version<"3.11"

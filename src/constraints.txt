@@ -4,7 +4,18 @@ pillow==11.3.0
 imageio-ffmpeg==0.6.0
 psutil==7.0.0
 PyYAML==6.0.2
-yt-dlp==2025.9.23
+# yt-dlp extra dependencies (base package cannot be constrained when using extras)
+brotli==1.1.0
+certifi==2025.8.3
+mutagen==1.47.0
+pycryptodomex==3.23.0
+requests==2.32.5
+urllib3==2.5.0
+websockets==15.0.1
+# yt-dlp[curl-cffi] dependencies
+curl-cffi==0.13.0
+cffi==2.0.0
+pycparser==2.23
 
 # Optional perf (POSIX only)
 uvloop==0.21.0 ; platform_system!="Windows"
