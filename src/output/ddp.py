@@ -155,6 +155,7 @@ class DDPOutput(BufferedOutputProtocol):
         output_id = int(params["out"])
         return (target_ip, output_id)
 
+
     async def ensure_exclusive_access(self, stream_key: Tuple[str, int]) -> None:
         """Ensure no conflicting streams exist globally across all DDP instances."""
         target_ip, out_id = stream_key
@@ -234,7 +235,7 @@ class DDPOutput(BufferedOutputProtocol):
         )
         self.socket = sock
         
-        logging.getLogger('ddp').info(f"started output to {self.target.host}:{self.target.port} (id={self.target.output_id})")
+        logging.getLogger('ddp').info(f"out={self.target.output_id} started output to {self.target.host}:{self.target.port}")
         
     async def stop(self) -> None:
         """Clean up UDP transport."""
@@ -251,7 +252,7 @@ class DDPOutput(BufferedOutputProtocol):
                 pass
             self.socket = None
             
-        logging.getLogger('ddp').info(f"stopped output {self.target.output_id}")
+        logging.getLogger('ddp').info(f"out={self.target.output_id} stopped output")
 
     async def flush_and_stop(self) -> None:
         """Stop DDP output and wait for complete queue drain."""
@@ -279,7 +280,7 @@ class DDPOutput(BufferedOutputProtocol):
                 pass
             self.socket = None
 
-        logging.getLogger('ddp').info(f"stopped output {self.target.output_id}")
+        logging.getLogger('ddp').info(f"out={self.target.output_id} stopped output")
 
         
     async def _send_frame_internal(self, frame_data: bytes, metadata: FrameMetadata) -> None:
@@ -395,7 +396,7 @@ class DDPOutput(BufferedOutputProtocol):
         
         # Burst phase
         if burst > 0:
-            logging.getLogger('ddp').info(f"still resend burst={burst} output={self.target.output_id}")
+            logging.getLogger('ddp').info(f"out={self.target.output_id} still resend burst={burst}")
             for i in range(burst):
                 before_enq = self._packets_enqueued
                 packets = list(ddp_iter_packets(
@@ -407,7 +408,7 @@ class DDPOutput(BufferedOutputProtocol):
                     self._packets_enqueued += 1
 
                 after_enq = self._packets_enqueued
-                logging.getLogger('ddp').debug(f"still-burst out={self.target.output_id} {i+1}/{burst} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
+                logging.getLogger('ddp').debug(f"out={self.target.output_id} still-burst {i+1}/{burst} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
 
                 if spacing_ms > 0 and i < burst - 1:
                     await asyncio.sleep(spacing_ms / 1000.0)
@@ -415,7 +416,7 @@ class DDPOutput(BufferedOutputProtocol):
         # Tail phase
         if tail_s > 0 and tail_hz > 0:
             est = int(tail_s * tail_hz)
-            logging.getLogger('ddp').debug(f"still resend tail={tail_s}s @ {tail_hz}Hz output={self.target.output_id} (~{est} sends)")
+            logging.getLogger('ddp').debug(f"out={self.target.output_id} still resend tail={tail_s}s @ {tail_hz}Hz (~{est} sends)")
             loop = asyncio.get_running_loop()
             end_time = loop.time() + tail_s
             tick = 1.0 / tail_hz
@@ -433,7 +434,7 @@ class DDPOutput(BufferedOutputProtocol):
                     self._packets_enqueued += 1
 
                 after_enq = self._packets_enqueued
-                logging.getLogger('ddp').debug(f"still-tail out={self.target.output_id} {i}/{est} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
+                logging.getLogger('ddp').debug(f"out={self.target.output_id} still-tail {i}/{est} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
 
                 await asyncio.sleep(max(0.0, next_time - loop.time()))
                 next_time += tick
