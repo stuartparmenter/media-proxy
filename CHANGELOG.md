@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-09-26
+
+### Added
+- Add new protocol handlers to create stream keys for avoiding duplicate streams
+- Add image cache for animations to improve performance
+- Add convert to animimg API functionality
+- Add safety measures to prevent multiple DDP streams to the same IP/output combination
+
+### Changed
+- Switch from websockets library to aiohttp for WebSocket handling
+- Use yt-dlp[default,curl-cffi] for enhanced YouTube downloading capabilities
+- Use URLs internally for source handling instead of file paths
+- Simplify video loading process
+- Make DDP logging more consistent
+
 ## [0.3.5] - 2025-09-25
 
 ### Added
