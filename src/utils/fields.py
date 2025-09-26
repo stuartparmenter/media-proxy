@@ -4,6 +4,9 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Set, Optional, Type, Union, Callable
 from enum import Enum
+import os
+from urllib.parse import urlparse
+from pathlib import Path
 
 
 class FieldType(Enum):
@@ -21,6 +24,7 @@ class FieldDef:
     field_type: Type
     validator: Optional[Callable[[Any], bool]] = None
     default_factory: Optional[Callable[..., Any]] = None
+    transformer: Optional[Callable[[Any], Any]] = None
     description: str = ""
 
     def validate(self, value: Any) -> bool:
@@ -41,13 +45,36 @@ class FieldDef:
                 return self.default_factory()
         return None
 
+    def transform(self, value: Any) -> Any:
+        """Transform a field value."""
+        if self.transformer:
+            return self.transformer(value)
+        return value
+
+
+def _normalize_source_url(source: str) -> str:
+    """Convert local file paths to file:// URLs, leave other URLs unchanged."""
+    try:
+        parsed = urlparse(source)
+        if parsed.scheme:
+            # Already has a scheme (http, https, file, etc.) - return as-is
+            return source
+        else:
+            # No scheme - treat as local path and convert to file:// URL
+            # Convert to absolute path and then to file:// URL
+            abs_path = Path(source).resolve()
+            return abs_path.as_uri()
+    except Exception:
+        # If anything fails, return the original source
+        return source
+
 
 class MediaFields:
     """Fields related to media content and source parameters."""
 
     WIDTH = FieldDef("w", int, lambda x: int(x) > 0, description="Display width")
     HEIGHT = FieldDef("h", int, lambda x: int(x) > 0, description="Display height")
-    SOURCE = FieldDef("src", str, description="Media source (file, URL, etc.)")
+    SOURCE = FieldDef("src", str, transformer=_normalize_source_url, description="Media source (file, URL, etc.)")
 
     LOOP = FieldDef("loop", bool,
                    default_factory=lambda config: config.get("playback.loop"),

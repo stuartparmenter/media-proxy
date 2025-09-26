@@ -61,7 +61,7 @@ class StreamOptions:
         output_id = int(params["out"])
         width = int(params["w"])
         height = int(params["h"])
-        source = str(params["src"])
+        source = MediaFields.SOURCE.transform(str(params["src"]))
         ddp_port = int(params.get("ddp_port", 4048))
 
         # Extract optional parameters directly - ControlFields validation is sufficient
