@@ -2,7 +2,7 @@ av==15.1.0
 numpy==2.3.2
 pillow==11.3.0
 imageio-ffmpeg==0.6.0
-psutil==7.0.0
+psutil==7.1.0
 PyYAML==6.0.3
 # yt-dlp extra dependencies (base package cannot be constrained when using extras)
 brotli==1.1.0
