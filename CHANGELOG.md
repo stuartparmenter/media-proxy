@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-09-26
+
+### Added
+- Add auto fit mode and make it the default
+
+### Changed
+- Code cleanup
+- Disable autocrop by default
+
+### Fixed
+- Correctly handle fit modes in image processing
+- Fix animimg config example
+
 ## [0.4.0] - 2025-09-26
 
 ### Added

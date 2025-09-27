@@ -1,5 +1,5 @@
 name: Media Proxy
-version: "0.4.0"
+version: "0.4.1"
 slug: media_proxy
 description: "WebSocket-controlled media proxy that outputs DDP (UDP)"
 url: https://github.com/stuartparmenter/media-proxy
