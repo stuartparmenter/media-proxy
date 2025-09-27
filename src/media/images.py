@@ -455,7 +455,7 @@ class PilFrameIterator(FrameIterator):
                                 canvas.paste(frame, (0, 0), frame)
 
                             # Process the composite canvas for output
-                            rgb888 = resize_pad_to_rgb_bytes(canvas, size, config)
+                            rgb888 = resize_pad_to_rgb_bytes(canvas, size, config, self.stream_options.fit)
 
                             # Cache frame if we're on first loop and caching is enabled
                             if should_cache and not self._first_loop_complete:
@@ -489,7 +489,7 @@ class PilFrameIterator(FrameIterator):
                                 )
                     else:
                         # Static image - pass as-is to handle transparency
-                        rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config)
+                        rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config, self.stream_options.fit)
                         yield rgb888, default_delay_ms
                         saw_frame = True
 

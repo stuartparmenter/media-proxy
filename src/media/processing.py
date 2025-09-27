@@ -81,8 +81,14 @@ def convert_to_srgb(img: Image.Image, config: Config = None) -> Image.Image:
         return img
 
 
-def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Config = None) -> bytes:
-    """Resize image to fit in target size with padding, return RGB888 bytes.
+def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Config = None, fit: str = "pad") -> bytes:
+    """Resize image to target size using specified fit mode, return RGB888 bytes.
+
+    Args:
+        img: PIL Image to resize
+        size: Target (width, height) tuple
+        config: Configuration object
+        fit: Fit mode - "pad", "cover", or "auto"
 
     For paletted images, preserves the palette through the resize operation
     to avoid quantization losses.
@@ -232,13 +238,36 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
             else:
                 img = img.convert("RGB")
 
-        # Compute contain size once (no resampling yet)
+        # Compute resize parameters based on fit mode
         src_w, src_h = img.size
         if src_w == 0 or src_h == 0:
             return b""
-        scale = min(w / src_w, h / src_h) if src_w and src_h else 1.0
-        new_w = max(1, int(round(src_w * scale)))
-        new_h = max(1, int(round(src_h * scale)))
+
+        # Calculate aspect ratios for auto mode
+        src_ratio = src_w / src_h
+        target_ratio = w / h
+
+        if fit == "cover":
+            # Scale to fill, may crop content
+            scale = max(w / src_w, h / src_h) if src_w and src_h else 1.0
+            new_w = max(1, int(round(src_w * scale)))
+            new_h = max(1, int(round(src_h * scale)))
+        elif fit == "auto":
+            # Smart fit: direct scale if aspect ratios match, else pad
+            if abs(src_ratio - target_ratio) < 0.01:
+                # Aspect ratios match - scale directly to target size
+                new_w, new_h = w, h
+            else:
+                # Aspect ratios differ - use contain scaling (like pad mode)
+                scale = min(w / src_w, h / src_h) if src_w and src_h else 1.0
+                new_w = max(1, int(round(src_w * scale)))
+                new_h = max(1, int(round(src_h * scale)))
+        else:  # "pad" mode
+            # Scale to fit, preserve aspect ratio
+            scale = min(w / src_w, h / src_h) if src_w and src_h else 1.0
+            new_w = max(1, int(round(src_w * scale)))
+            new_h = max(1, int(round(src_h * scale)))
+
         new_size = (new_w, new_h)
 
         if gamma_correct and resample not in (M.NEAREST,):
@@ -267,11 +296,20 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Con
         thresh = max(0, int(us.get("threshold", 2)))
         im = im.filter(ImageFilter.UnsharpMask(radius=radius, percent=int(amt * 100), threshold=thresh))
 
-    # Pad to final size if needed
+    # Final cropping/padding based on fit mode
     if im.size != size:
-        canvas = Image.new("RGB", size, (0, 0, 0))
-        canvas.paste(im, ((w - im.size[0]) // 2, (h - im.size[1]) // 2))
-        im = canvas
+        if fit == "cover":
+            # Crop to exact size (center crop)
+            left = max(0, (im.size[0] - w) // 2)
+            top = max(0, (im.size[1] - h) // 2)
+            right = left + w
+            bottom = top + h
+            im = im.crop((left, top, right, bottom))
+        else:
+            # For "pad" and "auto" modes - add padding to reach target size
+            canvas = Image.new("RGB", size, (0, 0, 0))
+            canvas.paste(im, ((w - im.size[0]) // 2, (h - im.size[1]) // 2))
+            im = canvas
         
     return np.asarray(im, dtype=np.uint8).tobytes()
 
