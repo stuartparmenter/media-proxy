@@ -91,7 +91,7 @@ class MediaFields:
                      description="Pixel format preference")
 
     FIT = FieldDef("fit", str,
-                  lambda x: str(x) in ("pad", "cover"),
+                  lambda x: str(x) in ("pad", "cover", "auto"),
                   default_factory=lambda config: config.get("video.fit"),
                   description="Video/image fit mode")
 
@@ -226,6 +226,7 @@ if __name__ == "__main__":
         ({"out": 1, "hw": "invalid"}, "Invalid hardware value (should fail)"),
         ({"out": 1, "fit": "cover"}, "Valid fit value"),
         ({"out": 1, "fit": "pad"}, "Valid pad fit value"),
+        ({"out": 1, "fit": "auto"}, "Valid auto fit value"),
         ({"out": 1, "fit": "invalid"}, "Invalid fit value (should fail)"),
     ]
 

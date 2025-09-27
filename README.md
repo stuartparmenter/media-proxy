@@ -10,7 +10,7 @@ Stream videos, GIFs, still images, and YouTube content to tiny LED/LCD displays 
 
 - WebSocket control server (default `:8788`) that accepts `start_stream`, `stop_stream`, and `update` commands.  
 - Video decoding via PyAV/FFmpeg with auto-rebuilding filter graph (handles rotation, SAR/PAR, format changes).  
-- Smart fit modes (`cover`, `pad`, `auto-*`), optional TV→PC range expansion, and automatic black-bar crop.  
+- Smart fit modes (`cover`, `pad`, `auto`), optional TV→PC range expansion, and automatic black-bar crop.  
 - Image path using `imageio` for stills and animated GIFs.  
 - UDP DDP sender with optional packet spreading and pacing for smoother delivery.  
 
@@ -51,12 +51,12 @@ hw:
 
 video:
   expand_mode: 2        # 0=never, 1=auto(limited->full), 2=force
-  fit: pad              # cover | pad
+  fit: auto             # cover | pad | auto
   autocrop:
-    enabled: true
-    probe_frames: 8
-    luma_thresh: 22
-    max_bar_ratio: 0.20
+    enabled: false      # Disabled by default for safety
+    probe_frames: 24    # More frames for stability
+    luma_thresh: 16     # Lower threshold for conservative detection
+    max_bar_ratio: 0.15 # More conservative cropping limit
     min_bar_px: 2
 
 playback:
@@ -95,6 +95,47 @@ playback_still:
   tail_s: 2.0
   tail_hz: 2
 ```
+
+---
+
+## Video Processing Options
+
+### Fit Modes
+
+- **`auto` (recommended)**: Smart mode that avoids unnecessary processing
+  - When source and target aspect ratios match: direct scaling with no padding/cropping
+  - When aspect ratios differ: falls back to `pad` behavior (preserves all content)
+  - Optimal for most use cases - maximum efficiency with no content loss
+
+- **`pad`**: Always preserves all content by adding black bars when needed
+  - Guarantees no content is cropped
+  - May add unnecessary padding even when aspect ratios match
+
+- **`cover`**: Fills display completely but may crop content
+  - Scales to fill the display and crops excess content
+  - Use only when you're okay with potentially losing parts of the image/video
+
+### Automatic Black Bar Cropping
+
+Autocrop automatically detects and removes letterbox/pillarbox bars from videos. It's disabled by default to avoid cropping legitimate dark content.
+
+```yaml
+video:
+  autocrop:
+    enabled: false      # Enable if needed for letterboxed content
+    probe_frames: 24    # Samples more frames for stability
+    luma_thresh: 16     # Conservative threshold to avoid dark content
+    max_bar_ratio: 0.15 # Won't crop more than 15% from any edge
+```
+
+**How it works:**
+- Analyzes the first 24 frames to detect consistent black borders
+- Uses conservative settings to minimize false positives
+- Once detected, applies the same crop to the entire stream
+
+**Considerations:**
+- May crop dark scenes or fade-to-black sequences if they occur early in the video
+- Best suited for content with consistent letterboxing throughout
 
 ---
 
@@ -155,7 +196,7 @@ Media Proxy provides a WebSocket control API on `/control` (default port `:8788`
   "h": 64,
   "src": "https://example.com/video.mp4",
   "ddp_port": 4048,
-  "fit": "cover",
+  "fit": "auto",
   "loop": true,
   "hw": "auto"
 }
@@ -169,7 +210,10 @@ Media Proxy provides a WebSocket control API on `/control` (default port `:8788`
 
 **Optional parameters:**
 - `ddp_port`: DDP output port (default: 4048)
-- `fit`: Resize mode - `cover` or `pad` (default from config)
+- `fit`: Resize mode - `cover`, `pad`, or `auto` (default: `auto`)
+  - `auto`: Smart fit - scales directly when aspect ratios match, adds padding when they don't (recommended)
+  - `pad`: Always scales to fit and adds black bars if needed (never crops content)
+  - `cover`: Scales to fill and crops excess content (may lose parts of the image/video)
 - `loop`: Loop media playback (boolean, default from config)
 - `hw`: Hardware acceleration - `auto`, `none`, `cuda`, `qsv`, `vaapi`, `videotoolbox`, `d3d11va`
 - `fmt`: Pixel format - `rgb888`, `rgb565le`, `rgb565be` (default: `rgb888`)

@@ -17,12 +17,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "hw": {"prefer": "auto"},
     "video": {
         "expand_mode": 2,  # 0=never, 1=auto(limited->full), 2=force
-        "fit": "pad",  # "pad" | "cover"
+        "fit": "auto",  # "pad" | "cover" | "auto"
         "autocrop": {
-            "enabled": True,
-            "probe_frames": 8,
-            "luma_thresh": 22,
-            "max_bar_ratio": 0.20,
+            "enabled": False,  # Disabled by default for safety
+            "probe_frames": 24,  # More frames for stability
+            "luma_thresh": 16,  # Lower threshold for conservative detection
+            "max_bar_ratio": 0.15,  # More conservative cropping limit
             "min_bar_px": 2
         }
     },

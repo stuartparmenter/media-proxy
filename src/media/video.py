@@ -360,7 +360,25 @@ class PyAvFrameIterator(FrameIterator):
                     n = g.add("crop", args=f"{TW}:{TH}:(in_w-{TW})/2:(in_h-{TH})/2")
                     last.link_to(n)
                     last = n
-                else:
+                elif fit_mode == "auto":
+                    # Smart fit: check if aspect ratios match
+                    src_ratio = (w * sar_n) / (h * sar_d) if sar_d != 0 else w / h
+                    target_ratio = TW / TH
+
+                    if abs(src_ratio - target_ratio) < 0.01:  # Aspect ratios match
+                        # Just scale directly - no padding or cropping needed
+                        n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear" + expand_args)
+                        last.link_to(n)
+                        last = n
+                    else:
+                        # Fall back to pad behavior for mismatched ratios
+                        n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear:force_original_aspect_ratio=decrease" + expand_args)
+                        last.link_to(n)
+                        last = n
+                        n = g.add("pad", args=f"{TW}:{TH}:(ow-iw)/2:(oh-ih)/2:color=black")
+                        last.link_to(n)
+                        last = n
+                else:  # "pad" mode
                     n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear:force_original_aspect_ratio=decrease" + expand_args)
                     last.link_to(n)
                     last = n
