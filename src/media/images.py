@@ -311,11 +311,12 @@ class PilFrameIterator(FrameIterator):
         options_hash.update(str(self.stream_options.__dict__).encode())
         return f"cache_{options_hash.hexdigest()[:16]}"
 
-    def _should_cache_frames(self, config: Config, n_frames: int, loop_video: bool) -> bool:
+    def _should_cache_frames(self, n_frames: int, loop_video: bool) -> bool:
         """Determine if frames should be cached based on config and animation properties."""
         if not loop_video:
             return False
 
+        config = Config()
         cache_mb = config.get("image.frame_cache_mb", 32)
         if cache_mb <= 0:
             return False
@@ -328,9 +329,9 @@ class PilFrameIterator(FrameIterator):
         width, height = size
         return width * height * 3  # RGB = 3 bytes per pixel
 
-    def _evict_cache_if_needed(self, config: Config, estimated_new_size: int) -> None:
+    def _evict_cache_if_needed(self, estimated_new_size: int) -> None:
         """Evict cache entries if adding new frames would exceed memory limit."""
-        cache_limit_bytes = config.get("image.frame_cache_mb", 32) * 1024 * 1024
+        cache_limit_bytes = Config().get("image.frame_cache_mb", 32) * 1024 * 1024
 
         if self._cache_memory_usage + estimated_new_size <= cache_limit_bytes:
             return
@@ -388,7 +389,7 @@ class PilFrameIterator(FrameIterator):
 
                 # Cache setup
                 cache_key = self._get_cache_key()
-                should_cache = self._should_cache_frames(config, n_frames, loop_video)
+                should_cache = self._should_cache_frames(n_frames, loop_video)
 
                 # Main iteration loop
                 loop_count = 0
@@ -455,7 +456,7 @@ class PilFrameIterator(FrameIterator):
                                 canvas.paste(frame, (0, 0), frame)
 
                             # Process the composite canvas for output
-                            rgb888 = resize_pad_to_rgb_bytes(canvas, size, config, self.stream_options.fit)
+                            rgb888 = resize_pad_to_rgb_bytes(canvas, size, self.stream_options.fit)
 
                             # Cache frame if we're on first loop and caching is enabled
                             if should_cache and not self._first_loop_complete:
@@ -477,7 +478,7 @@ class PilFrameIterator(FrameIterator):
                             # Cache frames after first complete loop
                             if should_cache and not self._first_loop_complete and len(current_loop_frames) == n_frames:
                                 estimated_size = len(current_loop_frames) * self._estimate_frame_size(size)
-                                self._evict_cache_if_needed(config, estimated_size)
+                                self._evict_cache_if_needed(estimated_size)
 
                                 self._frame_cache[cache_key] = current_loop_frames.copy()
                                 self._cache_memory_usage += estimated_size
@@ -489,7 +490,7 @@ class PilFrameIterator(FrameIterator):
                                 )
                     else:
                         # Static image - pass as-is to handle transparency
-                        rgb888 = resize_pad_to_rgb_bytes(pil_img, size, config, self.stream_options.fit)
+                        rgb888 = resize_pad_to_rgb_bytes(pil_img, size, self.stream_options.fit)
                         yield rgb888, default_delay_ms
                         saw_frame = True
 

@@ -9,21 +9,17 @@ from typing import Tuple
 from ..config import Config
 
 
-def convert_to_srgb(img: Image.Image, config: Config = None) -> Image.Image:
+def convert_to_srgb(img: Image.Image) -> Image.Image:
     """Convert image from embedded ICC profile to sRGB if needed.
 
     Args:
         img: PIL Image with potential ICC profile
-        config: Configuration object for color correction settings
 
     Returns:
         Image converted to sRGB color space
     """
-    if config is None:
-        config = Config()
-
     # Check if color correction is enabled
-    cfg = config.get("image", {}) or {}
+    cfg = Config().get("image", {}) or {}
     if not cfg.get("color_correction", True):
         return img
 
@@ -81,23 +77,21 @@ def convert_to_srgb(img: Image.Image, config: Config = None) -> Image.Image:
         return img
 
 
-def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], config: Config = None, fit: str = "pad") -> bytes:
+def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = "pad") -> bytes:
     """Resize image to target size using specified fit mode, return RGB888 bytes.
 
     Args:
         img: PIL Image to resize
         size: Target (width, height) tuple
-        config: Configuration object
         fit: Fit mode - "pad", "cover", or "auto"
 
     For paletted images, preserves the palette through the resize operation
     to avoid quantization losses.
     """
-    if config is None:
-        config = Config()
+    config = Config()
 
     # Convert ICC profile to sRGB if needed
-    img = convert_to_srgb(img, config)
+    img = convert_to_srgb(img)
 
     w, h = size
 

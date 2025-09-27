@@ -119,7 +119,7 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
     config = Config()
 
     # Create strongly typed streaming options from control parameters
-    stream_options = StreamOptions.from_control_params(params, config)
+    stream_options = StreamOptions.from_control_params(params)
 
     # Set network target from session
     stream_options.target_ip = session.client_ip

@@ -98,7 +98,7 @@ def create_minimal_stream_options(source: str, width: int, height: int, fit: str
         "loop": False,  # Extract once, don't loop
     }
 
-    return StreamOptions.from_control_params(fake_params, config)
+    return StreamOptions.from_control_params(fake_params)
 
 
 async def extract_frames(stream_options: StreamOptions, frame_limit: int, fps_limit: float = None) -> List[Tuple[bytes, float]]:

@@ -54,8 +54,9 @@ class StreamOptions:
         return (self.width, self.height)
 
     @classmethod
-    def from_control_params(cls, params: Dict[str, Any], config: Config) -> 'StreamOptions':
+    def from_control_params(cls, params: Dict[str, Any]) -> 'StreamOptions':
         """Create StreamOptions from control protocol parameters with validation and defaults."""
+        config = Config()
 
         # Extract and validate required parameters
         output_id = int(params["out"])

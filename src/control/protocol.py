@@ -158,11 +158,9 @@ class ControlProtocol(ABC):
         """Create output protocol for stream management. Override if needed."""
         # Default to DDP - subclasses can override for different protocols
         from ..streaming.options import StreamOptions
-        from ..config import Config
         from ..output.protocol import OutputProtocolFactory, OutputTarget
 
-        config = Config()
-        stream_options = StreamOptions.from_control_params(params, config)
+        stream_options = StreamOptions.from_control_params(params)
 
         target = OutputTarget(
             host="127.0.0.1",  # Temporary, will be set properly in streaming task
