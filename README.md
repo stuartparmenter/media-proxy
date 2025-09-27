@@ -1,8 +1,8 @@
-# Media Proxy — Home Assistant Add-on
+# Media Proxy
 
-Stream videos, GIFs, still images, and YouTube content to tiny LED/LCD displays (e.g., ESPHome devices using DDP) with smart resizing, optional color-range expansion, and packet pacing. This add-on exposes a WebSocket control API and pushes pixel data over UDP using the DDP format.
+Stream videos, GIFs, still images, and YouTube content to tiny LED/LCD displays (e.g., ESPHome devices using DDP) with smart resizing, optional color-range expansion, and packet pacing. Exposes a WebSocket control API and pushes pixel data over UDP using the DDP format.
 
-> The add-on launches `src/run.py` via `ha-addon/run.py`, which reads add-on options and execs the server with `--host/--port` and an optional `--config`.
+Available as a Home Assistant add-on or standalone Python application.
 
 ---
 
@@ -24,16 +24,43 @@ Stream videos, GIFs, still images, and YouTube content to tiny LED/LCD displays 
 
 ---
 
-## Install (as a custom add-on repository)
+## Installation
 
-1. In Home Assistant, open **Settings → Add-ons → Add-on Store**.  
-2. Click **⋮ → Repositories** and add:  
-   `https://github.com/stuartparmenter/media-proxy`  
-3. Find **Media Proxy** in the list and click **Install**.  
-4. After install, open the add-on:  
-   - Optionally enable **Start on boot** and **Watchdog**.  
-   - Add configuration (see below).  
-   - Click **Start**, then check the **Log** tab to verify it’s running.  
+### Home Assistant Add-on
+
+1. In Home Assistant, open **Settings → Add-ons → Add-on Store**.
+2. Click **⋮ → Repositories** and add:
+   `https://github.com/stuartparmenter/homeassistant-addons`
+3. Find **Media Proxy** in the list and click **Install**.
+4. After install, open the add-on:
+   - Optionally enable **Start on boot** and **Watchdog**.
+   - Add configuration (see below).
+   - Click **Start**, then check the **Log** tab to verify it's running.
+
+### Standalone Python Application
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/stuartparmenter/media-proxy.git
+   cd media-proxy
+   ```
+
+2. **Create and activate virtual environment:**
+   ```bash
+   cd src
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt -c constraints.txt
+   ```
+
+4. **Run the server:**
+   ```bash
+   python run.py --host 0.0.0.0 --port 8788
+   ```
 
 ---
 
