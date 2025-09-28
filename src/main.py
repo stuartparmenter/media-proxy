@@ -59,6 +59,7 @@ async def main():
                        help="Path to YAML/TOML/JSON config file")
     parser.add_argument("--log-level", default=None,
                        choices=["debug", "info", "warning", "warn", "error", "critical"],
+                       type=str.lower,
                        help="Set logging level (overrides config file)")
     args = parser.parse_args()
 
