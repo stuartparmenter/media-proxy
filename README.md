@@ -18,9 +18,9 @@ Available as a Home Assistant add-on or standalone Python application.
 
 ## Requirements
 
-- Home Assistant OS / Supervisor (add-on system).  
-- Network access from HA to your displays (UDP, typically port 4048).  
-- Python/FFmpeg dependencies are bundled in the container (`requirements.txt`, `constraints.txt`).  
+- Python 3.10+ with FFmpeg support
+- Network access to your displays (UDP, typically port 4048)
+- Dependencies listed in `requirements.txt` and `constraints.txt`
 
 ---
 
