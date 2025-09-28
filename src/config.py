@@ -109,15 +109,10 @@ def deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
 def load_config(path: str = None) -> Dict[str, Any]:
     """Load configuration with defaults and optional file override."""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # Deep copy
-    
+
     if path:
         deep_update(cfg, load_config_file(path))
-    else:
-        # Try auto-loading from current directory
-        auto = "ws_ddp_proxy.yaml"
-        if os.path.exists(auto):
-            deep_update(cfg, load_config_file(auto))
-    
+
     return cfg
 
 

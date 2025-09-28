@@ -66,11 +66,11 @@ Available as a Home Assistant add-on or standalone Python application.
 
 ## Configuration
 
-By default the add-on runs on `host: 0.0.0.0`, `port: 8788`.  
+By default the server runs on `host: 0.0.0.0`, `port: 8788`.
 
-You can optionally point it to a server configuration file. If you don’t set one, it defaults to `/config/media-proxy.yaml` — but you’ll need to create that file yourself if you want custom defaults.  
+You can optionally provide a configuration file using the `--config` argument. Without a config file, the application uses built-in defaults.
 
-### Example config file (`/config/media-proxy.yaml`)
+### Example config file
 
 ```yaml
 hw:

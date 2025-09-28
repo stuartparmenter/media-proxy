@@ -56,7 +56,7 @@ async def main():
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8788, help="Port to bind to (WebSocket + HTTP API)")
     parser.add_argument("--config", default=None,
-                       help="Path to YAML/TOML/JSON config (default: ws_ddp_proxy.yaml if present)")
+                       help="Path to YAML/TOML/JSON config file")
     parser.add_argument("--log-level", default=None,
                        choices=["debug", "info", "warning", "warn", "error", "critical"],
                        help="Set logging level (overrides config file)")
