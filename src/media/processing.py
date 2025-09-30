@@ -308,8 +308,75 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
     return np.asarray(im, dtype=np.uint8).tobytes()
 
 
+# Generate the complete HUB75 CIE1931 lookup table
+# Based on CIE L* perceptual lightness function scaled to 16-bit
+def _generate_hub75_cie1931_table():
+    """Generate CIE1931 table that matches HUB75 library behavior."""
+    table = np.zeros(256, dtype=np.uint16)
+
+    for i in range(256):
+        # Normalize input to 0-100 (CIE L* range)
+        L_star = (i / 255.0) * 100.0
+
+        # CIE L* to linear luminance conversion
+        if L_star > 8.0:
+            linear = ((L_star + 16.0) / 116.0) ** 3.0
+        else:
+            linear = L_star / 903.3
+
+        # Scale to 16-bit and round
+        value_16bit = int(linear * 65535.0 + 0.5)
+        table[i] = min(65535, max(0, value_16bit))
+
+    return table
+
+_HUB75_CIE1931_TABLE = _generate_hub75_cie1931_table()
+
+# Build inverse lookup table for HUB75 gamma compensation
+def _build_hub75_inverse_table():
+    """Build inverse lookup table to compensate for HUB75 CIE1931 gamma correction."""
+    # Create inverse mapping: gamma_corrected_value -> linear_input_value
+    inverse_table = np.zeros(65536, dtype=np.uint8)
+
+    for linear_input in range(256):
+        gamma_output = _HUB75_CIE1931_TABLE[linear_input]
+        inverse_table[gamma_output] = linear_input
+
+    # Fill gaps with interpolation for missing gamma values
+    for i in range(1, 65536):
+        if inverse_table[i] == 0 and i < 65535:
+            # Find next non-zero value
+            next_val = None
+            for j in range(i + 1, 65536):
+                if inverse_table[j] != 0:
+                    next_val = j
+                    break
+
+            if next_val is not None:
+                # Linear interpolation
+                prev_idx = i - 1
+                while prev_idx >= 0 and inverse_table[prev_idx] == 0:
+                    prev_idx -= 1
+
+                if prev_idx >= 0:
+                    prev_val = inverse_table[prev_idx]
+                    next_gamma_val = inverse_table[next_val]
+                    # Interpolate
+                    ratio = (i - prev_idx) / (next_val - prev_idx)
+                    inverse_table[i] = int(prev_val + ratio * (next_gamma_val - prev_val))
+
+    return inverse_table
+
+# Cache the inverse table
+_HUB75_INVERSE_TABLE = None
+
 def rgb888_to_565_bytes(rgb_bytes: bytes, endian: str) -> bytes:
-    """Convert RGB888 to RGB565 with proper quantization."""
+    """Convert RGB888 to RGB565 with proper quantization.
+
+    Applies inverse gamma compensation for HUB75 displays that use CIE1931 correction.
+    """
+    global _HUB75_INVERSE_TABLE
+
     arr = np.frombuffer(rgb_bytes, dtype=np.uint8)
     if arr.size % 3 != 0:
         # Truncate any ragged tail (shouldn't happen for correctly sized frames)
@@ -317,7 +384,24 @@ def rgb888_to_565_bytes(rgb_bytes: bytes, endian: str) -> bytes:
 
     pix = arr.reshape((-1, 3)).astype(np.float32)
 
-    # Simple quantization with proper rounding
+    # Pre-compensate for HUB75 CIE1931 gamma correction using exact inverse table
+    config = Config()
+    compensation_strength = config.get("processing.hub75_gamma_compensation")
+
+    if compensation_strength > 0.0:
+        if _HUB75_INVERSE_TABLE is None:
+            _HUB75_INVERSE_TABLE = _build_hub75_inverse_table()
+
+        # Apply inverse gamma correction using the exact HUB75 table
+        # First, scale to 16-bit range that the gamma table expects
+        pix_16bit = (pix / 255.0 * 65535.0).astype(np.uint16)
+        # Apply inverse transformation
+        pix_corrected = _HUB75_INVERSE_TABLE[pix_16bit].astype(np.float32)
+
+        # Blend between original and corrected based on compensation strength
+        pix = pix * (1.0 - compensation_strength) + pix_corrected * compensation_strength
+
+    # Quantization with proper rounding
     r = (pix[:, 0] / 255 * 31 + 0.5).astype(np.uint16)
     g = (pix[:, 1] / 255 * 63 + 0.5).astype(np.uint16)
     b = (pix[:, 2] / 255 * 31 + 0.5).astype(np.uint16)

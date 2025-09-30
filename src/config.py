@@ -28,6 +28,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "playback": {"loop": True},
     "youtube": {"60fps": True},
+    "processing": {
+        "hub75_gamma_compensation": 0.0,  # Pre-compensate for HUB75 CIE1931 gamma correction (0.0=off, 1.0=full)
+    },
     # Still-image quality controls for tiny/low-DPI targets
     "image": {
         # method: lanczos | bicubic | bilinear | box | nearest
