@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- YouTube video caching for small looping videos (< 5MB) to reduce bandwidth and improve loop performance
+- HTTP reconnect options for improved YouTube streaming reliability
+- Enhanced error logging with codec, hardware acceleration, and frame count diagnostics
+
+### Changed
+- Video iterators now handle looping internally for better resource management
+
+### Fixed
+- YouTube streaming I/O errors and connection drops now automatically reconnect
+- Video container resource leaks on exceptions
+
 ## [0.4.1] - 2025-09-26
 
 ### Added

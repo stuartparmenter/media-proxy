@@ -59,7 +59,7 @@ class DDPSender(asyncio.DatagramProtocol):
 
 def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str) -> Iterator[bytes]:
     """Generate DDP packets for a frame."""
-    
+
     if fmt == "rgb888":
         pixcfg = DDP_PIXEL_CFG_RGB888
         payload = memoryview(rgb_bytes)

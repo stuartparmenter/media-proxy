@@ -32,6 +32,9 @@ class StreamOptions:
     pace: int = field(metadata={'field_def': ProcessingFields.PACE})
     ema: float = field(metadata={'field_def': ProcessingFields.EMA})
 
+    # Caching options (set internally based on config + video size)
+    enable_cache: bool = field(init=False, default=False, repr=False)
+
     # Network configuration (set by create_streaming_task from session)
     _target_ip: str = field(init=False, default="", repr=False)
 
@@ -124,9 +127,10 @@ class StreamOptions:
 
     def log_info(self, session_info: str) -> None:
         """Log streaming configuration info."""
+        cache_str = f" cache={self.enable_cache}" if self.enable_cache else ""
         logging.getLogger('streaming').info(
             f"start_stream {session_info} out={self.output_id} "
             f"size={self.width}x{self.height} ddp_port={self.ddp_port} src={self.source} "
             f"pace={self.pace} ema={self.ema} expand={self.expand} "
-            f"loop={self.loop} hw={self.hw} fmt={self.fmt} fit={self.fit}"
+            f"loop={self.loop} hw={self.hw} fmt={self.fmt} fit={self.fit}{cache_str}"
         )

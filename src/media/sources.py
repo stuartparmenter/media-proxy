@@ -3,7 +3,7 @@
 
 import asyncio
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import unquote
 
 import yt_dlp
@@ -125,7 +125,7 @@ class MediaUnavailableError(Exception):
         self.original_error = original_error
 
 
-async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], hw_mode: Optional[str] = None) -> Tuple[str, Dict[str, str]]:
+async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], hw_mode: Optional[str] = None) -> Tuple[str, Dict[str, str], Dict[str, Any]]:
     """
     Async version of YouTube URL resolution.
     Resolve YouTube (and similar) page URLs into a direct media URL + HTTP headers
@@ -136,9 +136,12 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
         src_url: Source URL to resolve
         target_size: Target (width, height) for optimal format selection
         hw_mode: Hardware acceleration mode for codec preference
+
+    Returns:
+        Tuple of (media_url, http_options, info_dict)
     """
     if not is_youtube_url(src_url):
-        return src_url, {}
+        return src_url, {}, {}
 
     logger = logging.getLogger('sources')
 
@@ -179,7 +182,7 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(src_url, download=False)
             if info is None:
-                return src_url, {}
+                return src_url, {}, {}
             if "entries" in info and info["entries"]:
                 info = info["entries"][0]
             media_url = info.get("url") or src_url
@@ -220,7 +223,7 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
                 headers_str = headers_dict_to_ffmpeg_opt({k: v for k, v in rh.items()})
                 if headers_str:
                     headers["headers"] = headers_str
-            return media_url, headers
+            return media_url, headers, info
     
     try:
         # Run in thread pool to avoid blocking the event loop
@@ -234,24 +237,57 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
         else:
             # Other exceptions - log and return original URL
             logger.warning(f"URL resolution failed for {src_url}: {e!r}")
-            return src_url, {}
+            return src_url, {}, {}
 
 
 class MediaSource:
     """Represents a resolved media source."""
-    
-    def __init__(self, original_url: str, resolved_url: str, options: Dict[str, str] = None):
+
+    def __init__(self, original_url: str, resolved_url: str, options: Dict[str, str] = None, info: Dict[str, Any] = None):
         self.original_url = original_url
         self.resolved_url = resolved_url
         self.options = options or {}
+        self.info = info or {}  # yt-dlp metadata
         self.is_youtube = is_youtube_url(original_url)
-        
+
     def __repr__(self):
         return f"MediaSource(original={self.original_url!r}, resolved={self.resolved_url!r})"
+
+    def should_enable_cache(self, loop: bool) -> bool:
+        """Determine if FFmpeg cache: protocol should be enabled for this source.
+
+        Enables caching when:
+        - YouTube source (benefits from caching)
+        - Config enables caching
+        - Content will loop (reuse cache multiple times)
+        - Video size under threshold
+
+        Args:
+            loop: Whether content will loop
+
+        Returns:
+            True if cache should be enabled, False otherwise
+        """
+        if not self.is_youtube:
+            return False
+
+        config = Config()
+        if not config.get('youtube.cache.enabled'):
+            return False
+
+        if not loop:
+            return False
+
+        filesize = self.info.get('filesize') or self.info.get('filesize_approx')
+        if not filesize:
+            return False
+
+        max_size = config.get('youtube.cache.max_size')
+        return filesize < max_size
 
 
 async def resolve_media_source(src: str, stream_options) -> MediaSource:
     """Resolve a media source URL to a MediaSource object."""
     src_url = unquote(src)
-    resolved_url, options = await resolve_stream_url_async(src_url, stream_options.size, stream_options.hw)
-    return MediaSource(src_url, resolved_url, options)
+    resolved_url, options, info = await resolve_stream_url_async(src_url, stream_options.size, stream_options.hw)
+    return MediaSource(src_url, resolved_url, options, info)

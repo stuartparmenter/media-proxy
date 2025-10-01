@@ -117,8 +117,7 @@ def cleanup_active_image_sources():
     if active_count > 0:
         logging.getLogger('images').info(f"cleaning up {active_count} active image sources")
         _cleanup_all_sources()
-        return active_count
-    return 0
+    return active_count
 
 
 class ImageSource(ABC):

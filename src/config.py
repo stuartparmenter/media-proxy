@@ -27,7 +27,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         }
     },
     "playback": {"loop": True},
-    "youtube": {"60fps": True},
+    "youtube": {
+        "60fps": True,
+        "cache": {
+            "enabled": True,
+            "max_size": 5242880,  # 5MB - use FFmpeg cache: protocol for videos under this size
+        }
+    },
     # Still-image quality controls for tiny/low-DPI targets
     "image": {
         # method: lanczos | bicubic | bilinear | box | nearest

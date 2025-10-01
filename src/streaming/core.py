@@ -33,51 +33,69 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
     max_retries = 3
     retry_count = 0
 
+    # Resolve YouTube URL once before retry loop
+    resolved_url = src_url
+    source_options = {}
+
+    if is_youtube_url(src_url):
+        try:
+            source = await resolve_media_source(src_url, stream_options)
+            resolved_url = source.resolved_url
+            source_options = source.options
+
+            # Check if we should enable FFmpeg caching
+            if source.should_enable_cache(stream_options.loop):
+                config = Config()
+                filesize = source.info.get('filesize') or source.info.get('filesize_approx')
+                max_size = config.get('youtube.cache.max_size')
+                logging.getLogger('streaming').info(
+                    f"Enabling FFmpeg cache: size={filesize/1024/1024:.1f}MB < {max_size/1024/1024}MB"
+                )
+                stream_options.enable_cache = True
+
+        except Exception as e:
+            if isinstance(e, yt_dlp.DownloadError):
+                # YouTube format unavailable - re-raise for upstream handling
+                logging.getLogger('streaming').error(f"YouTube DownloadError: {e}")
+                raise MediaUnavailableError(f"YouTube resolution failed: {e}", original_src, e) from e
+            else:
+                # Other exceptions during URL resolution - re-raise
+                raise
+
+    # Retry loop for YouTube URL expiration
     while True:
         try:
-            # For YouTube URLs, resolve to get actual stream URL and options
-            if is_youtube_url(src_url):
-                try:
-                    source = await resolve_media_source(src_url, stream_options)
-                    resolved_url = source.resolved_url
-                    # Check if resolution actually succeeded (resolved URL should be different)
-                    if resolved_url == src_url:
-                        logging.getLogger('streaming').info(f"YouTube URL resolution failed on attempt {retry_count + 1}, will retry on PyAV error")
-                except Exception as e:
-                    if isinstance(e, yt_dlp.DownloadError):
-                        # YouTube format unavailable - trigger retry immediately
-                        logging.getLogger('streaming').info(f"YouTube DownloadError detected: {e}")
-                        retry_count += 1
-                        if retry_count > max_retries:
-                            raise MediaUnavailableError(f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e) from e
-                        logging.getLogger('streaming').info(f"YouTube DownloadError (attempt {retry_count}/{max_retries}), re-resolving...")
-                        await asyncio.sleep(0.5)
-                        continue
-                    else:
-                        # Other exceptions during URL resolution - re-raise
-                        raise
-            else:
-                resolved_url = src_url
-
-            # Use the factory to create the appropriate iterator
+            # Create iterator (handles looping internally)
             iterator = FrameIteratorFactory.create(src_url, stream_options)
 
             # If this is a PyAV iterator and we have a resolved URL, update it
-            if hasattr(iterator, 'real_src_url') and is_youtube_url(src_url):
+            if hasattr(iterator, 'real_src_url'):
                 iterator.real_src_url = resolved_url
 
-            # Iterate frames using the protocol
+                # Add HTTP resilience options for YouTube DASH/HLS streams
+                if hasattr(iterator, 'http_opts') and source_options:
+                    iterator.http_opts = source_options.copy()
+                    # Add FFmpeg protocol options for connection resilience
+                    iterator.http_opts.update({
+                        'reconnect': '1',           # Enable auto-reconnect on connection loss
+                        'reconnect_streamed': '1',  # Reconnect for streamed/chunked content (DASH)
+                        'reconnect_delay_max': '5', # Max 5 seconds between retry attempts
+                        'timeout': '10000000',      # 10 second read timeout (in microseconds)
+                    })
+                    logging.getLogger('streaming').debug(f"Added HTTP resilience options for YouTube stream")
+
+            # Iterate frames - the iterator handles looping internally
             frames_yielded = False
             for rgb888, delay_ms in iterator:
                 # Reset retry count on first successful frame
                 if not frames_yielded:
                     retry_count = 0
                     frames_yielded = True
+
                 yield rgb888, delay_ms
 
-            # If we get here without exception and we're looping, continue the loop
-            if not stream_options.loop:
-                break
+            # Iterator exhausted
+            break
 
 
         except urllib.error.HTTPError as e:
@@ -88,9 +106,20 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
             raise MediaUnavailableError(f"Network error: {e.reason}", original_src, e) from e
         except (av.error.HTTPError, av.error.HTTPClientError, av.error.HTTPServerError, av.error.InvalidDataError, av.error.ValueError) as e:
             # PyAV errors from video.py
+            errno_val = getattr(e, 'errno', None)
             if is_youtube_url(original_src):
-                # For YouTube URLs, these errors likely mean URL expiration or failed resolution - trigger retry
-                logging.getLogger('streaming').info(f"YouTube error detected: {e}")
+                # Log connection-specific diagnostics for YouTube streams
+                if errno_val == 5:
+                    logging.getLogger('streaming').warning(
+                        f"YouTube I/O error (errno 5 - connection lost): {e} "
+                        f"- attempt {retry_count + 1}/{max_retries}"
+                    )
+                else:
+                    logging.getLogger('streaming').info(
+                        f"YouTube error detected (errno={errno_val}): {e}"
+                    )
+
+                # For YouTube URLs, these errors likely mean URL expiration or connection loss - trigger retry
                 retry_count += 1
                 if retry_count > max_retries:
                     raise MediaUnavailableError(f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e) from e

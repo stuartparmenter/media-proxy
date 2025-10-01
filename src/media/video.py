@@ -199,12 +199,6 @@ class PyAvFrameIterator(FrameIterator):
     def __iter__(self) -> Iterator[Tuple[bytes, float]]:
         """Iterate frames from video sources using PyAV filter graph."""
         from ..utils.helpers import is_youtube_url
-        import asyncio
-
-        # For YouTube URLs, we need to resolve synchronously here
-        # This is a limitation of the current design - the protocol is sync but resolution is async
-        # For now, use the real_src_url that should be set by the streaming layer
-        http_opts = {}
 
         if is_youtube_url(self.src_url) and self.real_src_url == self.src_url:
             # If real_src_url wasn't updated, resolution may have failed
@@ -233,9 +227,27 @@ class PyAvFrameIterator(FrameIterator):
             AvBlockingIOError = None  # type: ignore
 
         first_graph_log_done = False
+        frames_decoded = 0  # Initialize outside try block for error logging
+        container = None  # Initialize for error handling scope
+        vstream = None  # Initialize for error handling scope
 
         try:
-            container, vstream = open_stream(self.real_src_url, self.stream_options.hw, options=self.http_opts)
+            # Determine URL to open (with optional cache: protocol)
+            pyav_url = self.real_src_url
+
+            # Enable FFmpeg cache protocol if requested
+            if self.stream_options.enable_cache:
+                logging.getLogger('video').info(f"Using FFmpeg cache: protocol")
+                pyav_url = f"cache:{pyav_url}"
+
+            # Log HTTP options if present (debug only, don't log auth tokens)
+            if self.http_opts and logging.getLogger('video').isEnabledFor(logging.DEBUG):
+                debug_opts = {k: (f"{len(v)} chars" if k == 'headers' else v)
+                              for k, v in self.http_opts.items()}
+                logging.getLogger('video').debug(f"HTTP options: {debug_opts}")
+
+            # Open container once before the loop
+            container, vstream = open_stream(pyav_url, self.stream_options.hw, options=self.http_opts)
             if vstream is None:
                 raise RuntimeError("no video stream")
 
@@ -401,82 +413,108 @@ class PyAvFrameIterator(FrameIterator):
                 src_in = src
                 sink_out = sink
 
-            last_pts_s: Optional[float] = None
+            # Main iteration loop
+            loop_count = 0
+            loop_video = self.stream_options.loop
 
-            for packet in container.demux(vstream):
-                # decode() may return 0..N frames (depending on codec & B-frames)
-                frames = packet.decode()
-                for frame in frames:
-                    # Auto-crop sampling on early frames (before building graph)
-                    if ac_enabled and not ac_decided and ac_seen < ac_probe_frames:
-                        try:
-                            gray = frame.to_ndarray(format="gray")
-                            cand = estimate_black_bars(frame.width, frame.height, gray,
-                                                     ac_thresh, ac_min_px, ac_max_ratio)
-                            # Adjust for rotation metadata
-                            r = rotation_from_stream_and_frame(vstream, frame)
-                            if r == 90:
-                                cand = {"l": cand["t"], "r": cand["b"], "t": cand["r"], "b": cand["l"]}
-                            elif r == 270:
-                                cand = {"l": cand["b"], "r": cand["t"], "t": cand["l"], "b": cand["r"]}
-                            elif r == 180:
-                                cand = {"l": cand["r"], "r": cand["l"], "t": cand["b"], "b": cand["t"]}
-                            for k in ("l", "r", "t", "b"):
-                                ac_samples[k].append(int(cand[k]))
-                        except Exception:
-                            pass
-                        finally:
-                            ac_seen += 1
-                            if ac_seen >= ac_probe_frames:
-                                import statistics as _st
-                                ac_crop = {k: int(_st.median(v) if v else 0) for k, v in ac_samples.items()}
-                                ac_decided = True
-                                # Force a rebuild next frame to apply crop
-                                graph = None
+            while True:
+                loop_count += 1
+                saw_frame = False
 
-                    ensure_graph_for(frame)
-                    src_in.push(frame)  # type: ignore[name-defined]
+                # Seek to beginning for 2nd+ loops when cache is enabled
+                if loop_count > 1 and self.stream_options.enable_cache:
+                    try:
+                        logging.getLogger('video').debug(f"Seeking to start for loop {loop_count} (cache enabled)")
+                        container.seek(0)
+                    except Exception as e:
+                        logging.getLogger('video').warning(f"Failed to seek to start: {e}, will continue without seek")
 
-                    # Pull 0..N filtered frames
-                    out_frames = []
-                    while True:
-                        try:
-                            of = sink_out.pull()  # type: ignore[name-defined]
-                            out_frames.append(of)
-                        except Exception as pe:
-                            if (AvBlockingIOError and isinstance(pe, AvBlockingIOError)) \
-                               or getattr(pe, "errno", None) in (11, 35) \
-                               or "resource temporarily unavailable" in str(pe).lower() \
-                               or "eagain" in str(pe).lower():
-                                break
-                            raise
+                # Reset per-loop state
+                last_pts_s: Optional[float] = None
 
-                    for of in out_frames:
-                        rgb888 = of.to_ndarray(format="rgb24").tobytes()
+                for packet in container.demux(vstream):
+                    # decode() may return 0..N frames (depending on codec & B-frames)
+                    frames = packet.decode()
+                    for frame in frames:
+                        saw_frame = True
+                        # Auto-crop sampling on early frames (before building graph)
+                        if ac_enabled and not ac_decided and ac_seen < ac_probe_frames:
+                            try:
+                                gray = frame.to_ndarray(format="gray")
+                                cand = estimate_black_bars(frame.width, frame.height, gray,
+                                                         ac_thresh, ac_min_px, ac_max_ratio)
+                                # Adjust for rotation metadata
+                                r = rotation_from_stream_and_frame(vstream, frame)
+                                if r == 90:
+                                    cand = {"l": cand["t"], "r": cand["b"], "t": cand["r"], "b": cand["l"]}
+                                elif r == 270:
+                                    cand = {"l": cand["b"], "r": cand["t"], "t": cand["l"], "b": cand["r"]}
+                                elif r == 180:
+                                    cand = {"l": cand["r"], "r": cand["l"], "t": cand["b"], "b": cand["t"]}
+                                for k in ("l", "r", "t", "b"):
+                                    ac_samples[k].append(int(cand[k]))
+                            except Exception:
+                                pass
+                            finally:
+                                ac_seen += 1
+                                if ac_seen >= ac_probe_frames:
+                                    import statistics as _st
+                                    ac_crop = {k: int(_st.median(v) if v else 0) for k, v in ac_samples.items()}
+                                    ac_decided = True
+                                    # Force a rebuild next frame to apply crop
+                                    graph = None
 
-                        # Compute inter-frame delay using PTS if available; otherwise avg_ms fallback
-                        delay_ms: float = float(avg_ms) if (avg_ms is not None) else 1000.0 / 10.0
-                        pts_s = None
-                        if of.pts is not None:
-                            tb_n, tb_d = tb_num_den(of.time_base or vstream.time_base)
-                            pts_s = float(of.pts) * (tb_n / tb_d)
-                        if pts_s is not None:
-                            if last_pts_s is None:
-                                delay_ms = float(avg_ms) if (avg_ms is not None) else 33.33
-                            else:
-                                delta_ms = (pts_s - last_pts_s) * 1000.0
-                                if avg_ms is not None:
-                                    low = 0.75 * avg_ms
-                                    high = 1.25 * avg_ms
-                                    delta_ms = max(low, min(high, delta_ms))
-                                elif delta_ms <= 0:
-                                    delta_ms = 33.33
-                                delay_ms = max(MIN_DELAY_MS, float(delta_ms))
-                            last_pts_s = pts_s
+                        ensure_graph_for(frame)
+                        src_in.push(frame)  # type: ignore[name-defined]
 
-                        yield rgb888, float(delay_ms)
+                        # Pull 0..N filtered frames
+                        out_frames = []
+                        while True:
+                            try:
+                                of = sink_out.pull()  # type: ignore[name-defined]
+                                out_frames.append(of)
+                            except Exception as pe:
+                                if (AvBlockingIOError and isinstance(pe, AvBlockingIOError)) \
+                                   or getattr(pe, "errno", None) in (11, 35) \
+                                   or "resource temporarily unavailable" in str(pe).lower() \
+                                   or "eagain" in str(pe).lower():
+                                    break
+                                raise
 
-            container.close()
+                        for of in out_frames:
+                            rgb888 = of.to_ndarray(format="rgb24").tobytes()
+                            frames_decoded += 1  # Increment frame counter
+
+                            # Compute inter-frame delay using PTS if available; otherwise avg_ms fallback
+                            delay_ms: float = float(avg_ms) if (avg_ms is not None) else 1000.0 / 10.0
+                            pts_s = None
+                            if of.pts is not None:
+                                tb_n, tb_d = tb_num_den(of.time_base or vstream.time_base)
+                                pts_s = float(of.pts) * (tb_n / tb_d)
+                            if pts_s is not None:
+                                if last_pts_s is None:
+                                    delay_ms = float(avg_ms) if (avg_ms is not None) else 33.33
+                                else:
+                                    delta_ms = (pts_s - last_pts_s) * 1000.0
+                                    if avg_ms is not None:
+                                        low = 0.75 * avg_ms
+                                        high = 1.25 * avg_ms
+                                        delta_ms = max(low, min(high, delta_ms))
+                                    elif delta_ms <= 0:
+                                        delta_ms = 33.33
+                                    delay_ms = max(MIN_DELAY_MS, float(delta_ms))
+                                last_pts_s = pts_s
+
+                            yield rgb888, float(delay_ms)
+
+                # End of single iteration - check if we should loop
+                if not saw_frame:
+                    # No frames decoded - likely end of stream or error
+                    raise RuntimeError(f"no frames decoded from source: {self.src_url}")
+
+                if not loop_video:
+                    # Not looping - exit after first iteration
+                    break
 
         except (av.error.HTTPError, av.error.HTTPClientError, av.error.HTTPServerError) as e:
             # HTTP errors - re-raise for upstream handling (streaming layer will decide if retry needed)
@@ -490,8 +528,41 @@ class PyAvFrameIterator(FrameIterator):
             if "no such file" in msg or "not found" in msg:
                 raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
 
+            # Enhanced error logging for I/O errors and other failures
+            errno_val = getattr(e, 'errno', None)
+
+            # Get codec information if available
+            try:
+                if vstream and hasattr(vstream, 'codec_context'):
+                    codec_name = getattr(vstream.codec_context, 'name', 'unknown')
+                else:
+                    codec_name = 'unknown'
+            except:
+                codec_name = 'unknown'
+
+            # Special handling for I/O errors (errno 5)
+            if errno_val == 5 or 'i/o error' in msg:
+                logging.getLogger('video').error(
+                    f"I/O error during decode: errno={errno_val} codec={codec_name} "
+                    f"hw={self.stream_options.hw} frames_decoded={frames_decoded} "
+                    f"http_opts={list(self.http_opts.keys()) if self.http_opts else 'none'}"
+                )
+            else:
+                # Log other errors with diagnostic context
+                logging.getLogger('video').error(
+                    f"Decode error: {type(e).__name__} errno={errno_val} codec={codec_name} "
+                    f"hw={self.stream_options.hw} frames_decoded={frames_decoded}"
+                )
+
             # Re-raise all other errors for upstream handling
             raise RuntimeError(f"av error: {e}") from e
+        finally:
+            # Always close container, even on errors
+            if container:
+                try:
+                    container.close()
+                except Exception:
+                    pass  # Ignore cleanup errors
 
     def cleanup(self) -> None:
         """Clean up any resources used by the iterator."""
