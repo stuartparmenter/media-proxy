@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-10-01
+
+### Fixed
+- YouTube URL matching now specifically requires https protocol to prevent playlist and other format mismatches
+
 ## [0.5.0] - 2025-10-01
 
 ### Added
@@ -194,7 +199,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Initial release from https://github.com/stuartparmenter/lvgl-ddp-stream
 
-[unreleased]: https://github.com/stuartparmenter/media-proxy/compare/v0.5.0...HEAD
+[unreleased]: https://github.com/stuartparmenter/media-proxy/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/stuartparmenter/media-proxy/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/stuartparmenter/media-proxy/compare/v0.4.1...v0.5.0
 [0.3.5]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.3...v0.3.4

@@ -76,39 +76,41 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
     try_60fps = config.get("youtube.60fps")
 
     # First, try 60fps at 720p regardless of target size (since 60fps is only available at 720p+)
+    # IMPORTANT: Only allow https protocol - avoid playlists (m3u8, dash) and streaming protocols
     if try_60fps:
         for codec in codecs:
-            components.append(f'bv*[fps>=60][vcodec*={codec}][height>=720][height<=720]')
+            components.append(f'bv*[fps>=60][vcodec*={codec}][height>=720][height<=720][protocol=https]')
             if not video_only:
-                components.append(f'b[fps>=60][vcodec*={codec}][height>=720][height<=720]')
+                components.append(f'b[fps>=60][vcodec*={codec}][height>=720][height<=720][protocol=https]')
 
     # Build codec-specific selectors for each resolution
     # This ensures explicit codec priority ordering
+    # IMPORTANT: Only allow https protocol - avoid playlists (m3u8, dash) and streaming protocols
     for res in resolutions:
         # For each codec in preference order, add specific selectors
         for i, codec in enumerate(codecs):
             # Then any fps - prioritize video-only
-            components.append(f'bv*[vcodec*={codec}][height>={res}][height<={res}]')
+            components.append(f'bv*[vcodec*={codec}][height>={res}][height<={res}][protocol=https]')
             if not video_only:
-                components.append(f'b[vcodec*={codec}][height>={res}][height<={res}]')
+                components.append(f'b[vcodec*={codec}][height>={res}][height<={res}][protocol=https]')
 
     # Fallback to any codec at each resolution - prioritize video-only
     for res in resolutions:
-        components.append(f"bv*[height>={res}][height<={res}]")
+        components.append(f'bv*[height>={res}][height<={res}][protocol=https]')
         if not video_only:
-            components.append(f"b[height>={res}][height<={res}]")
+            components.append(f'b[height>={res}][height<={res}][protocol=https]')
 
     # Final fallbacks for edge cases - prioritize video-only
-    components.append(f'bv*[vcodec~="{vcodec_regex}"][height>={H}]')  # Preferred codec, minimum height
-    components.append(f"bv*[height>={H}]")  # Any codec, minimum height
-    components.append(f'bv*[vcodec~="{vcodec_regex}"]')  # Preferred codec, any resolution
-    components.append("bv*")  # Any video-only stream
+    components.append(f'bv*[vcodec~="{vcodec_regex}"][height>={H}][protocol=https]')  # Preferred codec, minimum height
+    components.append(f'bv*[height>={H}][protocol=https]')  # Any codec, minimum height
+    components.append(f'bv*[vcodec~="{vcodec_regex}"][protocol=https]')  # Preferred codec, any resolution
+    components.append('bv*[protocol=https]')  # Any video-only stream (https only)
 
     if not video_only:
-        components.append(f'b[vcodec~="{vcodec_regex}"][height>={H}]')  # Preferred codec, minimum height
-        components.append(f"b[height>={H}]")  # Any codec, minimum height
-        components.append(f'b[vcodec~="{vcodec_regex}"]')  # Preferred codec, any resolution
-        components.append("b")  # Any combined stream
+        components.append(f'b[vcodec~="{vcodec_regex}"][height>={H}][protocol=https]')  # Preferred codec, minimum height
+        components.append(f'b[height>={H}][protocol=https]')  # Any codec, minimum height
+        components.append(f'b[vcodec~="{vcodec_regex}"][protocol=https]')  # Preferred codec, any resolution
+        components.append('b[protocol=https]')  # Any combined stream (https only)
 
     format_expr = "/".join(components)
 
