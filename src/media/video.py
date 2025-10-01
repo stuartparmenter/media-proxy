@@ -210,12 +210,12 @@ class PyAvFrameIterator(FrameIterator):
         TW, TH = self.stream_options.size
 
         # Auto-crop (black bar) config/state
-        ac_cfg = config.get("video.autocrop", {})
-        ac_enabled = bool(ac_cfg.get("enabled", True))
-        ac_probe_frames = int(ac_cfg.get("probe_frames", 8))
-        ac_thresh = int(ac_cfg.get("luma_thresh", 22))
-        ac_max_ratio = float(ac_cfg.get("max_bar_ratio", 0.20))
-        ac_min_px = int(ac_cfg.get("min_bar_px", 2))
+        ac_cfg = config.get("video.autocrop")
+        ac_enabled = bool(ac_cfg.get("enabled"))
+        ac_probe_frames = int(ac_cfg.get("probe_frames"))
+        ac_thresh = int(ac_cfg.get("luma_thresh"))
+        ac_max_ratio = float(ac_cfg.get("max_bar_ratio"))
+        ac_min_px = int(ac_cfg.get("min_bar_px"))
         ac_samples: Dict[str, List[int]] = {"l": [], "r": [], "t": [], "b": []}
         ac_decided = False
         ac_crop = {"l": 0, "r": 0, "t": 0, "b": 0}  # in source pixel coords

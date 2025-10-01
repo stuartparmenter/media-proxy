@@ -73,7 +73,7 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
 
     # Check config for 60fps preference
     config = Config()
-    try_60fps = config.get("youtube.60fps", True)
+    try_60fps = config.get("youtube.60fps")
 
     # First, try 60fps at 720p regardless of target size (since 60fps is only available at 720p+)
     if try_60fps:

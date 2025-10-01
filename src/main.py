@@ -19,7 +19,7 @@ def setup_logging(config, override_level=None):
     if override_level:
         log_level_str = override_level.lower()
     else:
-        log_level_str = config.get("log.level", "info").lower()
+        log_level_str = config.get("log.level").lower()
 
     # Map string levels to logging constants
     level_map = {

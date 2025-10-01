@@ -316,11 +316,11 @@ class PilFrameIterator(FrameIterator):
             return False
 
         config = Config()
-        cache_mb = config.get("image.frame_cache_mb", 32)
+        cache_mb = config.get("image.frame_cache_mb")
         if cache_mb <= 0:
             return False
 
-        min_frames = config.get("image.frame_cache_min_frames", 5)
+        min_frames = config.get("image.frame_cache_min_frames")
         return n_frames >= min_frames
 
     def _estimate_frame_size(self, size: Tuple[int, int]) -> int:
@@ -330,7 +330,7 @@ class PilFrameIterator(FrameIterator):
 
     def _evict_cache_if_needed(self, estimated_new_size: int) -> None:
         """Evict cache entries if adding new frames would exceed memory limit."""
-        cache_limit_bytes = Config().get("image.frame_cache_mb", 32) * 1024 * 1024
+        cache_limit_bytes = Config().get("image.frame_cache_mb") * 1024 * 1024
 
         if self._cache_memory_usage + estimated_new_size <= cache_limit_bytes:
             return

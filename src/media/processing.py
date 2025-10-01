@@ -24,8 +24,8 @@ def convert_to_srgb(img: Image.Image) -> Image.Image:
         Image converted to sRGB color space
     """
     # Check if color correction is enabled
-    cfg = Config().get("image", {}) or {}
-    if not cfg.get("color_correction", True):
+    cfg = Config().get("image")
+    if not cfg.get("color_correction"):
         return img
 
     try:
@@ -102,7 +102,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
     w, h = size
 
     # Choose resample method - optimized for LED displays
-    cfg = config.get("image", {}) or {}
+    cfg = config.get("image")
     method_s = str(cfg.get("method")).lower()
     M = Image.Resampling
     METHOD_MAP = {
@@ -155,7 +155,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
                 original_palette = palette_rgb.reshape(-1, 3)
 
     # Gamma-aware resize (linear light)
-    gamma_correct = bool(cfg.get("gamma_correct", True))
+    gamma_correct = bool(cfg.get("gamma_correct"))
 
     def _to_linear_u8(rgb_u8: np.ndarray) -> np.ndarray:
         # sRGB -> linear via 1D LUT (fast & accurate for u8)
@@ -291,11 +291,11 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
             im = img.resize(new_size, resample=resample)
 
     # Optional mild sharpen to recover micro-contrast on very small outputs
-    us = cfg.get("unsharp", {}) or {}
-    amt = float(us.get("amount", 0.0))
+    us = cfg.get("unsharp")
+    amt = float(us.get("amount"))
     if amt > 0.0:
-        radius = max(0.1, float(us.get("radius", 0.6)))
-        thresh = max(0, int(us.get("threshold", 2)))
+        radius = max(0.1, float(us.get("radius")))
+        thresh = max(0, int(us.get("threshold")))
         im = im.filter(ImageFilter.UnsharpMask(radius=radius, percent=int(amt * 100), threshold=thresh))
 
     # Final cropping/padding based on fit mode

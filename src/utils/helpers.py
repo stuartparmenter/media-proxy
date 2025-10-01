@@ -77,7 +77,7 @@ def compute_spacing_and_group(pkt_count: int, frame_interval_s: float) -> Tuple[
 
     config = Config()
     min_s = float(config.get("net.spread_min_ms")) / 1000.0
-    max_sleeps = int(config.get("net.spread_max_sleeps", 6))
+    max_sleeps = int(config.get("net.spread_max_sleeps"))
 
     # Ideal per-packet spacing if we slept once per packet
     ideal = frame_interval_s / float(pkt_count)

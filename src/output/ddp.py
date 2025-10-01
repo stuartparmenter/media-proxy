@@ -131,7 +131,7 @@ class DDPOutput(BufferedOutputProtocol):
         self.spread_max_fps = int(app_config.get("net.spread_max_fps"))
 
         # Still frame resend configuration
-        self.still_resend_config = app_config.get("playback_still", {})
+        self.still_resend_config = app_config.get("playback_still")
         self.last_frame_data: Optional[bytes] = None
         self.last_frame_seq: Optional[int] = None
         self.last_frame_was_still = False

@@ -134,20 +134,20 @@ class Config:
         """Load configuration from file."""
         self._config = load_config(path)
         
-    def get(self, key: Optional[str] = None, default: Any = None) -> Any:
+    def get(self, key: Optional[str] = None) -> Any:
         """Get configuration value by key path (e.g., 'video.fit')."""
         if key is None:
             return self._config
-            
+
         keys = key.split('.')
         value = self._config
-        
+
         for k in keys:
             if isinstance(value, dict) and k in value:
                 value = value[k]
             else:
-                return default
-                
+                raise KeyError(f"Configuration key not found: {key}")
+
         return value
         
     def set(self, key: str, value: Any) -> None:
