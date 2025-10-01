@@ -5,7 +5,7 @@ import asyncio
 import io
 import logging
 import zipfile
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from PIL import Image
 from aiohttp import web
 import yaml
@@ -101,7 +101,7 @@ def create_minimal_stream_options(source: str, width: int, height: int, fit: str
     return StreamOptions.from_control_params(fake_params)
 
 
-async def extract_frames(stream_options: StreamOptions, frame_limit: int, fps_limit: float = None) -> List[Tuple[bytes, float]]:
+async def extract_frames(stream_options: StreamOptions, frame_limit: int, fps_limit: Optional[float] = None) -> List[Tuple[bytes, float]]:
     """Extract frames using existing media processing pipeline."""
     frames = []
 

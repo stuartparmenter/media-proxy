@@ -114,14 +114,12 @@ class BufferedOutputProtocol(OutputProtocol):
     
     def __init__(self, target: OutputTarget, stream_options: StreamOptions):
         super().__init__(target, stream_options)
-        self._queue: Optional[asyncio.Queue] = None
+        self._queue: asyncio.Queue[Tuple[bytes, FrameMetadata]] = asyncio.Queue(maxsize=4096)
         self._worker_task: Optional[asyncio.Task] = None
-        self._max_queue_size = 4096  # Default output queue size
-        
+
     async def start(self) -> None:
         """Start the buffered output with worker task."""
         await super().start()
-        self._queue = asyncio.Queue(maxsize=self._max_queue_size)
         self._worker_task = asyncio.create_task(self._worker_loop())
         
     async def stop(self) -> None:
@@ -137,18 +135,16 @@ class BufferedOutputProtocol(OutputProtocol):
             except Exception as e:
                 logging.getLogger('output').error(f"worker cleanup error: {e!r}")
 
-        if self._queue:
-            # Try to flush remaining items quickly
-            try:
-                await asyncio.wait_for(self._queue.join(), timeout=0.5)
-            except asyncio.TimeoutError:
-                pass
+        # Try to flush remaining items quickly
+        try:
+            await asyncio.wait_for(self._queue.join(), timeout=0.5)
+        except asyncio.TimeoutError:
+            pass
 
     async def flush_and_stop(self) -> None:
         """Stop the buffered output and wait for complete queue drain."""
-        if self._queue:
-            # Wait for all queued items to be processed completely
-            await self._queue.join()
+        # Wait for all queued items to be processed completely
+        await self._queue.join()
 
         # Now stop the protocol and clean up
         await super().stop()
@@ -164,7 +160,7 @@ class BufferedOutputProtocol(OutputProtocol):
                 
     async def send_frame(self, frame_data: bytes, metadata: FrameMetadata) -> None:
         """Queue a frame for sending."""
-        if not self._running or not self._queue:
+        if not self._running:
             return
             
         if self._queue.full():
@@ -207,28 +203,6 @@ class BufferedOutputProtocol(OutputProtocol):
             logging.getLogger('output').error(f"worker loop error: {e!r}")
 
 
-class StreamingOutputProtocol(OutputProtocol):
-    """Base class for streaming output protocols (non-buffered, real-time)."""
-    
-    def __init__(self, target: OutputTarget, config: Dict[str, Any]):
-        super().__init__(target, config)
-        
-    @abstractmethod
-    async def _handle_streaming_frame(self, frame_data: bytes, metadata: FrameMetadata) -> None:
-        """Handle a frame in streaming mode (direct send)."""
-        pass
-        
-    async def send_frame(self, frame_data: bytes, metadata: FrameMetadata) -> None:
-        """Send frame directly without buffering."""
-        if not self._running:
-            return
-            
-        try:
-            await self._handle_streaming_frame(frame_data, metadata)
-            self.metrics.frames_sent += 1
-            self.metrics.bytes_sent += len(frame_data)
-        except Exception as e:
-            logging.getLogger('output').error(f"streaming frame error: {e!r}")
 
 
 class OutputProtocolFactory:

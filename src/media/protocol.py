@@ -49,7 +49,7 @@ class FrameIteratorFactory:
 
         for name, iterator_class in cls._iterators.items():
             # Check compatibility without creating an instance
-            if iterator_class.can_handle(src_url):
+            if iterator_class.can_handle(src_url):  # type: ignore[attr-defined]  # can_handle is a class method on all registered iterators
                 return iterator_class(src_url, stream_options)
 
         raise ValueError(f"No frame iterator available for source: {src_url}")

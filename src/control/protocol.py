@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Tuple
 import asyncio
 import logging
+from aiohttp.web_ws import WebSocketResponse
 from ..utils.fields import ControlFields
 from .handlers import ControlHandlerRegistry
 
@@ -12,9 +13,10 @@ from .handlers import ControlHandlerRegistry
 class ControlSession:
     """Represents a client control session."""
 
-    def __init__(self, client_id: str, client_ip: str):
+    def __init__(self, client_id: str, client_ip: str, websocket: WebSocketResponse):
         self.client_id = client_id
         self.client_ip = client_ip
+        self.websocket = websocket
         self.device_id: Optional[str] = None
         self.active_streams: Dict[Any, asyncio.Task] = {}  # stream_key -> task
         self.created_at = asyncio.get_event_loop().time()
@@ -26,7 +28,7 @@ class ControlSession:
 class ControlProtocol(ABC):
     """Abstract base class for control protocols (WebSocket, HTTP, etc.)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.sessions: Dict[str, ControlSession] = {}
 
     @abstractmethod

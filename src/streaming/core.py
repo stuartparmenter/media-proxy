@@ -48,8 +48,10 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
                 config = Config()
                 filesize = source.info.get('filesize') or source.info.get('filesize_approx')
                 max_size = config.get('youtube.cache.max_size')
+                max_size_mb = max_size / 1024 / 1024
+                size_str = f"{filesize/1024/1024:.1f}MB" if filesize else "unknown"
                 logging.getLogger('streaming').info(
-                    f"Enabling FFmpeg cache: size={filesize/1024/1024:.1f}MB < {max_size/1024/1024}MB"
+                    f"Enabling FFmpeg cache: size={size_str}, max={max_size_mb:.0f}MB"
                 )
                 stream_options.enable_cache = True
 
@@ -159,9 +161,6 @@ async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task
     # Create the streaming task
     task = asyncio.create_task(streaming_task(stream_options))
 
-    # Attach the streaming options to the task for the control layer to access
-    task.stream_options = stream_options
-
     def on_done(t: asyncio.Task):
         try:
             exc = t.exception()
@@ -260,7 +259,7 @@ async def _run_native_streaming(output, stream_options: StreamOptions):
 
 
 
-async def _run_paced_streaming(output, stream_options: StreamOptions):
+async def _run_paced_streaming(output, stream_options: StreamOptions) -> None:
     """Run streaming with fixed pacing (producer + sampler pattern)."""
     import numpy as np
 
@@ -268,7 +267,7 @@ async def _run_paced_streaming(output, stream_options: StreamOptions):
     ema_alpha = stream_options.ema
 
     # Shared state
-    latest_frame: Dict[str, bytes] = {"data": None}
+    latest_frame: Dict[str, Optional[bytes]] = {"data": None}
     latest_lock = asyncio.Lock()
 
     # Producer task
@@ -281,10 +280,10 @@ async def _run_paced_streaming(output, stream_options: StreamOptions):
             await asyncio.sleep(max(0.01, delay_ms / 1000.0))
 
     # Sampler task
-    async def sampler():
+    async def sampler() -> None:
         tick = 1.0 / pace_hz
         next_time = asyncio.get_event_loop().time()
-        ema_buf_f32: np.ndarray = None
+        ema_buf_f32: Optional[np.ndarray] = None
         seq = 0
 
         while True:

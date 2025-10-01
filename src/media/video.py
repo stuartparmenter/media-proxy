@@ -5,7 +5,7 @@ import contextlib
 import logging
 import numpy as np
 import os
-from typing import Iterator, Tuple, Dict, Optional
+from typing import Iterator, Tuple, Dict, Optional, Any, List
 import av
 from av.codec.hwaccel import HWAccel
 from av.filter import Graph as AvFilterGraph
@@ -155,7 +155,7 @@ class PyAvFrameIterator(FrameIterator):
     def __init__(self, src_url: str, stream_options):
         super().__init__(src_url, stream_options)
         self.real_src_url = src_url  # May be updated for YouTube URLs
-        self.http_opts = {}  # May be updated for YouTube URLs
+        self.http_opts: Dict[str, Any] = {}  # May be updated for YouTube URLs
 
     @classmethod
     def can_handle(cls, src_url: str) -> bool:
@@ -216,15 +216,15 @@ class PyAvFrameIterator(FrameIterator):
         ac_thresh = int(ac_cfg.get("luma_thresh", 22))
         ac_max_ratio = float(ac_cfg.get("max_bar_ratio", 0.20))
         ac_min_px = int(ac_cfg.get("min_bar_px", 2))
-        ac_samples = {"l": [], "r": [], "t": [], "b": []}
+        ac_samples: Dict[str, List[int]] = {"l": [], "r": [], "t": [], "b": []}
         ac_decided = False
         ac_crop = {"l": 0, "r": 0, "t": 0, "b": 0}  # in source pixel coords
         ac_seen = 0
 
         try:
-            from av.error import BlockingIOError as AvBlockingIOError  # type: ignore
+            from av.error import BlockingIOError as AvBlockingIOError  # type: ignore[import]  # PyAV stubs may not include this
         except Exception:
-            AvBlockingIOError = None  # type: ignore
+            AvBlockingIOError = None  # type: ignore[misc,assignment]  # Fallback when PyAV doesn't have BlockingIOError
 
         first_graph_log_done = False
         frames_decoded = 0  # Initialize outside try block for error logging
@@ -264,7 +264,7 @@ class PyAvFrameIterator(FrameIterator):
             # Rebuildable filter graph state
             graph = None
             src_in = sink_out = None
-            g_props = {"w": None, "h": None, "fmt": None, "sar": (1, 1), "rot": 0}
+            g_props: Dict[str, Any] = {"w": None, "h": None, "fmt": None, "sar": (1, 1), "rot": 0}
 
             def ensure_graph_for(frame) -> None:
                 """(Re)build the filter graph if geometry/SAR/format/rotation changed."""
@@ -465,16 +465,19 @@ class PyAvFrameIterator(FrameIterator):
                                     graph = None
 
                         ensure_graph_for(frame)
-                        src_in.push(frame)  # type: ignore[name-defined]
+                        assert src_in is not None, "Filter graph must be initialized"
+                        src_in.push(frame)  # type: ignore[name-defined]  # src_in defined conditionally via ensure_graph_for
 
                         # Pull 0..N filtered frames
                         out_frames = []
                         while True:
                             try:
-                                of = sink_out.pull()  # type: ignore[name-defined]
+                                assert sink_out is not None, "Filter graph must be initialized"
+                                of = sink_out.pull()  # type: ignore[name-defined]  # sink_out defined conditionally via ensure_graph_for
                                 out_frames.append(of)
                             except Exception as pe:
-                                if (AvBlockingIOError and isinstance(pe, AvBlockingIOError)) \
+                                # Check for PyAV blocking IO errors
+                                if (AvBlockingIOError is not None and isinstance(pe, AvBlockingIOError)) \
                                    or getattr(pe, "errno", None) in (11, 35) \
                                    or "resource temporarily unavailable" in str(pe).lower() \
                                    or "eagain" in str(pe).lower():
@@ -482,7 +485,7 @@ class PyAvFrameIterator(FrameIterator):
                                 raise
 
                         for of in out_frames:
-                            rgb888 = of.to_ndarray(format="rgb24").tobytes()
+                            rgb888 = of.to_ndarray(format="rgb24").tobytes()  # type: ignore[attr-defined]  # PyAV Frame.to_ndarray returns array-like with tobytes
                             frames_decoded += 1  # Increment frame counter
 
                             # Compute inter-frame delay using PTS if available; otherwise avg_ms fallback

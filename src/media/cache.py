@@ -16,10 +16,11 @@ import weakref
 import atexit
 from abc import ABC, abstractmethod
 from typing import Any
+from weakref import WeakSet
 
 
 # Global registry for cleanup tracking
-_active_sources = weakref.WeakSet()
+_active_sources: WeakSet[Any] = weakref.WeakSet()
 
 
 def _cleanup_all_sources():

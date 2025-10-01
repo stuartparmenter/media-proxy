@@ -5,8 +5,13 @@ import io
 import logging
 import numpy as np
 from PIL import Image, ImageFilter, ImageCms
-from typing import Tuple
+from PIL.ImageCms import Intent
+from typing import Tuple, Optional
 from ..config import Config
+
+# Module-level LUT caches for gamma correction
+_LINEAR_LUT: Optional[np.ndarray] = None
+_SRGB_LUT: Optional[np.ndarray] = None
 
 
 def convert_to_srgb(img: Image.Image) -> Image.Image:
@@ -59,11 +64,12 @@ def convert_to_srgb(img: Image.Image) -> Image.Image:
             srgb_profile,
             img.mode,
             img.mode,
-            renderingIntent=1
+            renderingIntent=Intent.RELATIVE_COLORIMETRIC
         )
 
         # Apply the transformation
         converted_img = ImageCms.applyTransform(img, transform)
+        assert converted_img is not None, "ImageCms.applyTransform must return an image"
 
         # Remove the old ICC profile
         converted_img.info = img.info.copy()
@@ -144,7 +150,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
         palette_data = img.palette.getdata()[1]  # (mode, palette_bytes)
         if len(palette_data) >= 3:  # Ensure we have RGB data
             # Convert palette bytes to RGB array
-            palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)
+            palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)  # type: ignore[call-overload]  # numpy stubs limitation with bytes/buffer input
             if len(palette_rgb) % 3 == 0:
                 original_palette = palette_rgb.reshape(-1, 3)
 
@@ -153,7 +159,8 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
 
     def _to_linear_u8(rgb_u8: np.ndarray) -> np.ndarray:
         # sRGB -> linear via 1D LUT (fast & accurate for u8)
-        if not hasattr(_to_linear_u8, "_lut"):
+        global _LINEAR_LUT
+        if _LINEAR_LUT is None:
             # build once
             x = np.arange(256, dtype=np.float32) / 255.0
             lut = np.where(
@@ -161,19 +168,20 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
                 x / 12.92,
                 ((x + 0.055) / 1.055) ** 2.4
             )
-            _to_linear_u8._lut = (lut * 65535.0 + 0.5).astype(np.uint16)  # promote for precision
-        return _to_linear_u8._lut[rgb_u8]
+            _LINEAR_LUT = (lut * 65535.0 + 0.5).astype(np.uint16)  # promote for precision
+        return _LINEAR_LUT[rgb_u8]
 
     def _to_srgb_u8(lin_u16: np.ndarray) -> np.ndarray:
-        if not hasattr(_to_srgb_u8, "_lut"):
+        global _SRGB_LUT
+        if _SRGB_LUT is None:
             y = np.linspace(0.0, 1.0, 65536, dtype=np.float32)
             lut = np.where(
                 y <= 0.0031308,
                 y * 12.92,
                 1.055 * (y ** (1/2.4)) - 0.055
             )
-            _to_srgb_u8._lut = (lut * 255.0 + 0.5).astype(np.uint8)
-        return _to_srgb_u8._lut[lin_u16]
+            _SRGB_LUT = (lut * 255.0 + 0.5).astype(np.uint8)
+        return _SRGB_LUT[lin_u16]
 
     # Handle paletted images specially to preserve colors
     transparency_index = None

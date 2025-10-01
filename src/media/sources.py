@@ -119,7 +119,7 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
 
 class MediaUnavailableError(Exception):
     """Raised when a media source is temporarily unavailable (HTTP errors, network issues, etc.)."""
-    def __init__(self, message: str, url: str, original_error: Exception = None):
+    def __init__(self, message: str, url: str, original_error: Optional[Exception] = None):
         super().__init__(message)
         self.url = url
         self.original_error = original_error
@@ -243,7 +243,7 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
 class MediaSource:
     """Represents a resolved media source."""
 
-    def __init__(self, original_url: str, resolved_url: str, options: Dict[str, str] = None, info: Dict[str, Any] = None):
+    def __init__(self, original_url: str, resolved_url: str, options: Optional[Dict[str, str]] = None, info: Optional[Dict[str, Any]] = None):
         self.original_url = original_url
         self.resolved_url = resolved_url
         self.options = options or {}

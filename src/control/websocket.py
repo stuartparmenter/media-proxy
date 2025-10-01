@@ -59,9 +59,9 @@ class WebSocketControlProtocol(ControlProtocol):
         remote_addr = request.remote
         session = ControlSession(
             client_id=f"ws-{id(ws)}",
-            client_ip=remote_addr if remote_addr else "unknown"
+            client_ip=remote_addr if remote_addr else "unknown",
+            websocket=ws
         )
-        session.websocket = ws  # Store websocket reference
 
         try:
             # Handshake

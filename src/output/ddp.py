@@ -37,12 +37,12 @@ DDP_PIXEL_CFG_RGB565_LE = 0x62
 class DDPSender(asyncio.DatagramProtocol):
     """UDP protocol for sending DDP packets."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.transport: Optional[asyncio.DatagramTransport] = None
         self.packets_sent = 0
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        self.transport = transport  # type: ignore[assignment]
+        self.transport = transport  # type: ignore[assignment]  # asyncio DatagramTransport compatibility
 
     def error_received(self, exc: BaseException) -> None:
         logging.getLogger('ddp').error(f"error_received: {exc!r}")
@@ -53,7 +53,7 @@ class DDPSender(asyncio.DatagramProtocol):
 
     def sendto(self, data: bytes, addr):
         if self.transport is not None:
-            self.transport.sendto(data, addr)  # type: ignore[union-attr]
+            self.transport.sendto(data, addr)  # type: ignore[union-attr]  # transport is always DatagramTransport when initialized
             self.packets_sent += 1
 
 
@@ -230,7 +230,7 @@ class DDPOutput(BufferedOutputProtocol):
         sock.bind(("0.0.0.0", 0))
         
         self.sender = DDPSender()
-        self.transport, _ = await loop.create_datagram_endpoint(
+        self.transport, _ = await loop.create_datagram_endpoint(  # type: ignore[type-var]  # asyncio transport/protocol tuple unpacking
             lambda: self.sender, sock=sock
         )
         self.socket = sock
@@ -408,7 +408,7 @@ class DDPOutput(BufferedOutputProtocol):
                     self._packets_enqueued += 1
 
                 after_enq = self._packets_enqueued
-                logging.getLogger('ddp').debug(f"out={self.target.output_id} still-burst {i+1}/{burst} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
+                logging.getLogger('ddp').debug(f"out={self.target.output_id} still-burst {i+1}/{burst} enq+={after_enq-before_enq} q={self._queue.qsize()}/{self._queue.maxsize}")
 
                 if spacing_ms > 0 and i < burst - 1:
                     await asyncio.sleep(spacing_ms / 1000.0)
@@ -434,7 +434,7 @@ class DDPOutput(BufferedOutputProtocol):
                     self._packets_enqueued += 1
 
                 after_enq = self._packets_enqueued
-                logging.getLogger('ddp').debug(f"out={self.target.output_id} still-tail {i}/{est} enq+={after_enq-before_enq} q={self._queue.qsize() if self._queue else 0}/{self._max_queue_size}")
+                logging.getLogger('ddp').debug(f"out={self.target.output_id} still-tail {i}/{est} enq+={after_enq-before_enq} q={self._queue.qsize()}/{self._queue.maxsize}")
 
                 await asyncio.sleep(max(0.0, next_time - loop.time()))
                 next_time += tick
@@ -452,7 +452,7 @@ class DDPOutput(BufferedOutputProtocol):
                 f"out={self.target.output_id} pace={self.pace_hz}Hz "
                 f"fps={metrics['fps']:.2f} pps={metrics['pps']:.0f} "
                 f"pkt_jit={metrics['packet_jitter_ms']:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
-                f"q_avg={metrics['queue_avg']:.0f}/{self._max_queue_size} "
+                f"q_avg={metrics['queue_avg']:.0f}/{self._queue.maxsize} "
                 f"q_max={metrics['queue_max']} "
                 f"enq={self._packets_enqueued} tx={self.sender.packets_sent if self.sender else 0} "
                 f"drops={metrics['queue_drops']}{spread_tag}"
@@ -464,7 +464,7 @@ class DDPOutput(BufferedOutputProtocol):
                 f"out={self.target.output_id} native "
                 f"fps={metrics['fps']:.2f} (~{target_fps:.1f} tgt) pps={metrics['pps']:.0f} "
                 f"pkt_jit={metrics['packet_jitter_ms']:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
-                f"q_avg={metrics['queue_avg']:.0f}/{self._max_queue_size} "
+                f"q_avg={metrics['queue_avg']:.0f}/{self._queue.maxsize} "
                 f"q_max={metrics['queue_max']} "
                 f"enq={self._packets_enqueued} tx={self.sender.packets_sent if self.sender else 0} "
                 f"drops={metrics['queue_drops']}{spread_tag}"

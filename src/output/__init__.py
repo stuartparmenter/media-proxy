@@ -4,7 +4,7 @@
 """Output protocol implementations for different streaming formats."""
 
 from .protocol import (
-    OutputProtocol, BufferedOutputProtocol, StreamingOutputProtocol,
+    OutputProtocol, BufferedOutputProtocol,
     OutputTarget, FrameMetadata, OutputMetrics, OutputProtocolFactory
 )
 
@@ -13,7 +13,7 @@ from .ddp import DDPOutput
 
 __all__ = [
     # Base protocols
-    "OutputProtocol", "BufferedOutputProtocol", "StreamingOutputProtocol",
+    "OutputProtocol", "BufferedOutputProtocol",
     # Data structures
     "OutputTarget", "FrameMetadata", "OutputMetrics",
     # Factory

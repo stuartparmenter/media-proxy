@@ -18,7 +18,7 @@ def get_ffmpeg_exe_path() -> Optional[str]:
     if exe:
         return exe
     try:
-        import imageio_ffmpeg  # type: ignore
+        import imageio_ffmpeg  # type: ignore[import]  # imageio-ffmpeg has no type stubs
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
         return None
@@ -55,6 +55,7 @@ def pick_hw_backend(prefer: Optional[str] = None) -> Optional[str]:
         return pn if pn in _hw_backend_cache else None
 
     # Auto selection based on platform
+    candidates: tuple[str, ...]
     if sys == "windows":
         candidates = ("cuda", "d3d11va", "qsv")
     elif sys == "darwin":
@@ -74,9 +75,10 @@ def set_windows_timer_resolution(enable: bool = True) -> None:
     if os.name == "nt":
         try:
             import ctypes
+            winmm = ctypes.windll.winmm  # type: ignore[attr-defined]  # windll only exists on Windows
             if enable:
-                ctypes.windll.winmm.timeBeginPeriod(1)
+                winmm.timeBeginPeriod(1)
             else:
-                ctypes.windll.winmm.timeEndPeriod(1)
+                winmm.timeEndPeriod(1)
         except Exception as e:
             logging.getLogger('hardware').warning(f"timeBeginPeriod/timeEndPeriod failed: {e}")

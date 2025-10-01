@@ -140,7 +140,7 @@ class AllFields:
     """Centralized registry of all field definitions organized by domain."""
 
     # Create a flat registry for backward compatibility
-    ALL_FIELDS = {}
+    ALL_FIELDS: Dict[str, Any] = {}
 
     def __init_subclass__(cls):
         super().__init_subclass__()
@@ -169,7 +169,7 @@ class AllFields:
     def validate_fields(cls, params: Dict[str, Any], operation: str) -> None:
         """Validate that required fields are present and valid for an operation."""
         # Get required fields for this operation
-        required = getattr(cls, f"REQUIRED_FOR_{operation.upper()}", set())
+        required: Set[str] = getattr(cls, f"REQUIRED_FOR_{operation.upper()}", set())
 
         # Check missing fields
         missing = [f for f in required if f not in params]
@@ -217,7 +217,7 @@ if __name__ == "__main__":
         print(f"Basic field validation failed: {e}")
 
     # Test field-specific validation
-    test_cases = [
+    test_cases: list[tuple[Dict[str, Any], str]] = [
         ({"out": 1, "expand": 1}, "Valid expand value"),
         ({"out": 1, "expand": 5}, "Invalid expand value (should fail)"),
         ({"out": 1, "fmt": "rgb888"}, "Valid format value"),

@@ -1,0 +1,2 @@
+mypy>=1.13,<2
+types-PyYAML>=6,<7

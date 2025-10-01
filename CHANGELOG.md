@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-10-01
+
 ### Added
 - YouTube video caching for small looping videos (< 5MB) to reduce bandwidth and improve loop performance
 - HTTP reconnect options for improved YouTube streaming reliability
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - YouTube streaming I/O errors and connection drops now automatically reconnect
 - Video container resource leaks on exceptions
+- Type checking errors for Windows-specific ctypes.windll on non-Windows platforms
 
 ## [0.4.1] - 2025-09-26
 
@@ -191,7 +194,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Initial release from https://github.com/stuartparmenter/lvgl-ddp-stream
 
-[unreleased]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.5...HEAD
+[unreleased]: https://github.com/stuartparmenter/media-proxy/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/stuartparmenter/media-proxy/compare/v0.4.1...v0.5.0
 [0.3.5]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/stuartparmenter/media-proxy/compare/v0.3.2...v0.3.3

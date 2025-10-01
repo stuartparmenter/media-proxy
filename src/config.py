@@ -4,13 +4,10 @@
 import json
 import logging
 import os
-from typing import Dict, Any
+import tomllib
+from typing import Dict, Any, Optional
 
 import yaml
-try:
-    import tomllib  # Python 3.11+
-except ImportError:
-    import tomli as tomllib  # Fallback for older Python versions
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -112,7 +109,7 @@ def deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
     return dst
 
 
-def load_config(path: str = None) -> Dict[str, Any]:
+def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration with defaults and optional file override."""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # Deep copy
 
@@ -133,11 +130,11 @@ class Config:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def load(self, path: str = None) -> None:
+    def load(self, path: Optional[str] = None) -> None:
         """Load configuration from file."""
         self._config = load_config(path)
         
-    def get(self, key: str = None, default: Any = None) -> Any:
+    def get(self, key: Optional[str] = None, default: Any = None) -> Any:
         """Get configuration value by key path (e.g., 'video.fit')."""
         if key is None:
             return self._config

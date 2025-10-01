@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Type
 import logging
 
 
@@ -45,10 +45,10 @@ class DDPControlHandler(ControlHandler):
 class ControlHandlerRegistry:
     """Registry for control handlers with automatic protocol detection."""
 
-    _handlers = [DDPControlHandler]
+    _handlers: list[Type[ControlHandler]] = [DDPControlHandler]
 
     @classmethod
-    def detect_handler(cls, params: Dict[str, Any]) -> Optional[ControlHandler]:
+    def detect_handler(cls, params: Dict[str, Any]) -> Optional[Type[ControlHandler]]:
         """Find the appropriate handler for the given parameters."""
         for handler_class in cls._handlers:
             if handler_class.detect(params):

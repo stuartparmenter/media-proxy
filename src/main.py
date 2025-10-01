@@ -7,18 +7,10 @@ import logging
 import os
 import sys
 
-# Handle both direct execution and module execution
-if __name__ == "__main__" and __package__ is None:
-    # Direct execution: python main.py
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from config import Config
-    from api.server import start_unified_server
-    from utils.hardware import set_windows_timer_resolution
-else:
-    # Module execution: python -m src.main
-    from .config import Config
-    from .api.server import start_unified_server
-    from .utils.hardware import set_windows_timer_resolution
+# Always use relative imports (run via run.py or python -m src.main)
+from .config import Config
+from .api.server import start_unified_server
+from .utils.hardware import set_windows_timer_resolution
 
 
 def setup_logging(config, override_level=None):

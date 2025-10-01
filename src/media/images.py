@@ -3,7 +3,7 @@
 
 import numpy as np
 from PIL import Image
-from typing import Iterator, Tuple, Dict, List
+from typing import Iterator, Tuple, Dict, List, Optional, Any
 import urllib.request
 from io import BytesIO
 import tempfile
@@ -97,7 +97,7 @@ def _get_normalized_blend_mode(pil_img: Image.Image) -> int:
     return BlendMode.OVER
 
 # Global registry for cleanup tracking
-_active_image_sources = weakref.WeakSet()
+_active_image_sources: weakref.WeakSet[Any] = weakref.WeakSet()
 
 
 def _cleanup_all_sources():
@@ -138,7 +138,7 @@ class BytesIOSource(ImageSource):
     """Image source that uses in-memory BytesIO for small images."""
 
     def __init__(self, data: bytes):
-        self.data = data
+        self._data: bytes = data
         self._cleaned = False
         # Register for cleanup tracking
         _active_image_sources.add(self)
@@ -146,12 +146,12 @@ class BytesIOSource(ImageSource):
     def open_image(self) -> Image.Image:
         if self._cleaned:
             raise RuntimeError("Attempted to use cleaned up ImageSource")
-        return Image.open(BytesIO(self.data))
+        return Image.open(BytesIO(self._data))
 
     def cleanup(self) -> None:
         if self._cleaned:
             return
-        self.data = None
+        del self._data
         self._cleaned = True
         # Remove from tracking (weakref will handle this automatically too)
         try:
@@ -283,7 +283,7 @@ class PilFrameIterator(FrameIterator):
 
     def __init__(self, src_url: str, stream_options):
         super().__init__(src_url, stream_options)
-        self.img_source = None
+        self._img_source: Optional[ImageSource] = None
         self._frame_cache: Dict[str, List[Tuple[bytes, float]]] = {}
         self._cache_memory_usage = 0
         self._cache_stats = {"hits": 0, "misses": 0, "evictions": 0}
@@ -356,11 +356,12 @@ class PilFrameIterator(FrameIterator):
         default_delay_ms = 100.0  # 10 FPS
 
         # Create optimized image source (memory vs temp file)
-        self.img_source = _create_image_source(self.src_url)
+        self._img_source = _create_image_source(self.src_url)
+        img_source = self._img_source  # Local reference for type narrowing
 
         try:
             # Open image once and keep it open for the iteration
-            pil_img = self.img_source.open_image()
+            pil_img = img_source.open_image()
             try:
                 is_animated = getattr(pil_img, 'is_animated', False)
                 n_frames = getattr(pil_img, 'n_frames', 1) if is_animated else 1
@@ -376,7 +377,7 @@ class PilFrameIterator(FrameIterator):
                         try:
                             palette_data = pil_img.palette.getdata()[1]
                             if len(palette_data) >= 3:
-                                palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)
+                                palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)  # type: ignore[call-overload]  # numpy stubs limitation with bytes/buffer input
                                 if len(palette_rgb) % 3 == 0:
                                     global_palette = palette_rgb.reshape(-1, 3)
                         except:
@@ -511,9 +512,9 @@ class PilFrameIterator(FrameIterator):
 
     def cleanup(self) -> None:
         """Clean up any resources used by the iterator."""
-        if self.img_source:
-            self.img_source.cleanup()
-            self.img_source = None
+        if self._img_source:
+            self._img_source.cleanup()
+            self._img_source = None
 
         # Log cache statistics
         stats = self._cache_stats

@@ -28,6 +28,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r src/requirements.txt -c src/constraints.txt
 
+    - name: Install type checking dependencies
+      run: |
+        pip install -r src/requirements-dev.txt
+
+    - name: Run type checker
+      run: |
+        mypy src/
+
     - name: Smoke test - verify application loads
       run: |
         cd src && python run.py --help
