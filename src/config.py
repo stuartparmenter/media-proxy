@@ -31,6 +31,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "max_size": 5242880,  # 5MB - use FFmpeg cache: protocol for videos under this size
         }
     },
+    "processing": {
+        # HUB75 gamma compensation: apply power-law gamma to compensate for panel gamma
+        # 0.0 = disabled, ~0.92 = compensate for sRGB (2.2) vs panel CIE1931 (2.4)
+        # Typical range: 0.85-0.95. Lower = darker/more contrast, higher = brighter/less banding
+        "hub75_gamma_compensation": 0.92,
+    },
     # Still-image quality controls for tiny/low-DPI targets
     "image": {
         # method: lanczos | bicubic | bilinear | box | nearest

@@ -312,8 +312,122 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
             canvas = Image.new("RGB", size, (0, 0, 0))
             canvas.paste(im, ((w - im.size[0]) // 2, (h - im.size[1]) // 2))
             im = canvas
-        
-    return np.asarray(im, dtype=np.uint8).tobytes()
+
+    rgb_bytes = np.asarray(im, dtype=np.uint8).tobytes()
+
+    # Apply HUB75 gamma compensation if enabled
+    return apply_hub75_gamma_compensation(rgb_bytes)
+
+
+# Generate the complete HUB75 CIE1931 lookup table
+# Based on CIE L* perceptual lightness function scaled to 16-bit
+def _generate_hub75_cie1931_table():
+    """Generate CIE1931 table that matches HUB75 library behavior."""
+    table = np.zeros(256, dtype=np.uint16)
+
+    for i in range(256):
+        # Normalize input to 0-100 (CIE L* range)
+        L_star = (i / 255.0) * 100.0
+
+        # CIE L* to linear luminance conversion
+        if L_star > 8.0:
+            linear = ((L_star + 16.0) / 116.0) ** 3.0
+        else:
+            linear = L_star / 903.3
+
+        # Scale to 16-bit and round
+        value_16bit = int(linear * 65535.0 + 0.5)
+        table[i] = min(65535, max(0, value_16bit))
+
+    return table
+
+
+_HUB75_CIE1931_TABLE = _generate_hub75_cie1931_table()
+
+
+# Build inverse lookup table for HUB75 gamma compensation
+def _build_hub75_inverse_table():
+    """Build inverse lookup table to compensate for HUB75 CIE1931 gamma correction."""
+    # Create inverse mapping: gamma_corrected_value -> linear_input_value
+    inverse_table = np.zeros(65536, dtype=np.uint8)
+
+    for linear_input in range(256):
+        gamma_output = _HUB75_CIE1931_TABLE[linear_input]
+        inverse_table[gamma_output] = linear_input
+
+    # Fill gaps with interpolation for missing gamma values
+    for i in range(1, 65536):
+        if inverse_table[i] == 0 and i < 65535:
+            # Find next non-zero value
+            next_val = None
+            for j in range(i + 1, 65536):
+                if inverse_table[j] != 0:
+                    next_val = j
+                    break
+
+            if next_val is not None:
+                # Linear interpolation
+                prev_idx = i - 1
+                while prev_idx >= 0 and inverse_table[prev_idx] == 0:
+                    prev_idx -= 1
+
+                if prev_idx >= 0:
+                    prev_val = inverse_table[prev_idx]
+                    next_gamma_val = inverse_table[next_val]
+                    # Interpolate
+                    ratio = (i - prev_idx) / (next_val - prev_idx)
+                    inverse_table[i] = int(prev_val + ratio * (next_gamma_val - prev_val))
+
+    return inverse_table
+
+
+# Cache the inverse table
+_HUB75_INVERSE_TABLE = None
+
+
+def apply_hub75_gamma_compensation(rgb_bytes: bytes) -> bytes:
+    """Apply HUB75 gamma compensation to RGB888 bytes.
+
+    Pre-compensates for HUB75 displays that use CIE1931 gamma correction,
+    preventing the double-gamma issue where sRGB content appears too dark.
+
+    The compensation applies a power-law gamma correction to adjust sRGB content
+    (gamma ~2.2) for panels that apply additional gamma (~2.4). Use values around
+    0.9-0.95 for typical HUB75 panels with CIE1931 correction.
+
+    Args:
+        rgb_bytes: RGB888 bytes (3 bytes per pixel)
+
+    Returns:
+        Compensated RGB888 bytes
+    """
+    config = Config()
+    try:
+        gamma = float(config.get("processing.hub75_gamma_compensation"))
+    except (KeyError, TypeError, ValueError):
+        gamma = 0.0
+
+    if gamma <= 0.0 or gamma == 1.0:
+        return rgb_bytes
+
+    arr = np.frombuffer(rgb_bytes, dtype=np.uint8)
+    if arr.size % 3 != 0:
+        arr = arr[: (arr.size // 3) * 3]
+
+    # Apply power-law gamma correction
+    # Normalize to 0-1 range
+    pix = arr.astype(np.float32) / 255.0
+
+    # Apply gamma curve: out = in^gamma
+    pix = np.power(pix, gamma)
+
+    # Convert back to 0-255 range
+    pix = pix * 255.0
+
+    # Clamp to valid range and convert back to uint8
+    pix = np.clip(pix, 0, 255).astype(np.uint8)
+
+    return pix.tobytes()
 
 
 def rgb888_to_565_bytes(rgb_bytes: bytes, endian: str) -> bytes:

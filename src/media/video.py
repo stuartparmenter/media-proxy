@@ -13,6 +13,7 @@ from av.filter import Graph as AvFilterGraph
 from ..config import Config
 from .protocol import FrameIterator
 from ..utils.helpers import resolve_local_path
+from .processing import apply_hub75_gamma_compensation
 
 MIN_DELAY_MS = 10.0
 
@@ -486,6 +487,10 @@ class PyAvFrameIterator(FrameIterator):
 
                         for of in out_frames:
                             rgb888 = of.to_ndarray(format="rgb24").tobytes()  # type: ignore[attr-defined]  # PyAV Frame.to_ndarray returns array-like with tobytes
+
+                            # Apply HUB75 gamma compensation if enabled
+                            rgb888 = apply_hub75_gamma_compensation(rgb888)
+
                             frames_decoded += 1  # Increment frame counter
 
                             # Compute inter-frame delay using PTS if available; otherwise avg_ms fallback

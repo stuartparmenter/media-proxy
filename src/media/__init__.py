@@ -8,7 +8,7 @@ from .sources import resolve_media_source, MediaSource, MediaUnavailableError
 from .protocol import FrameIterator, FrameIteratorFactory
 from .images import PilFrameIterator
 from .video import PyAvFrameIterator
-from .processing import resize_pad_to_rgb_bytes, rgb888_to_565_bytes
+from .processing import resize_pad_to_rgb_bytes, rgb888_to_565_bytes, apply_hub75_gamma_compensation
 
 __all__ = [
     # Sources
@@ -17,5 +17,5 @@ __all__ = [
     "FrameIterator", "FrameIteratorFactory",
     "PilFrameIterator", "PyAvFrameIterator",
     # Processing
-    "resize_pad_to_rgb_bytes", "rgb888_to_565_bytes"
+    "resize_pad_to_rgb_bytes", "rgb888_to_565_bytes", "apply_hub75_gamma_compensation"
 ]
