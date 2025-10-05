@@ -74,7 +74,7 @@ class MediaFields:
 
     WIDTH = FieldDef("w", int, lambda x: int(x) > 0, description="Display width")
     HEIGHT = FieldDef("h", int, lambda x: int(x) > 0, description="Display height")
-    SOURCE = FieldDef("src", str, transformer=_normalize_source_url, description="Media source (file, URL, etc.)")
+    SOURCE = FieldDef("src", str, validator=lambda x: len(str(x).strip()) > 0, transformer=_normalize_source_url, description="Media source (file, URL, etc.)")
 
     LOOP = FieldDef("loop", bool,
                    default_factory=lambda config: config.get("playback.loop"),
