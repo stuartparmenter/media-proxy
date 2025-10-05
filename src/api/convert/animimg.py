@@ -107,7 +107,7 @@ async def extract_frames(stream_options: StreamOptions, frame_limit: int, fps_li
 
     try:
         # Create frame iterator using existing factory
-        iterator = FrameIteratorFactory.create(stream_options.source, stream_options)
+        iterator = await FrameIteratorFactory.create(stream_options.source, stream_options)
 
         frame_count = 0
         last_frame_time = 0.0

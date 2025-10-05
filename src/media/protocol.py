@@ -2,18 +2,30 @@
 # SPDX-License-Identifier: MIT
 
 from abc import ABC, abstractmethod
-from typing import Iterator, Tuple, Dict, Any, TYPE_CHECKING
+from typing import Iterator, Tuple, Dict, Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..streaming.options import StreamOptions
 
 
 class FrameIterator(ABC):
-    """Abstract base class for frame iteration from various media sources."""
+    """Abstract base class for frame iteration from various media sources.
+
+    All iterators must implement async_init() for non-blocking resource initialization.
+    """
 
     def __init__(self, src_url: str, stream_options: 'StreamOptions'):
         self.src_url = src_url
         self.stream_options = stream_options
+
+    @abstractmethod
+    async def async_init(self):
+        """Initialize async resources (HTTP fetches, file I/O, etc.).
+
+        This method is called by the factory before the iterator is returned.
+        Must be implemented by all subclasses.
+        """
+        pass
 
     @abstractmethod
     def __iter__(self) -> Iterator[Tuple[bytes, float]]:
@@ -43,14 +55,31 @@ class FrameIteratorFactory:
         cls._iterators[name] = iterator_class
 
     @classmethod
-    def create(cls, src_url: str, stream_options: 'StreamOptions') -> FrameIterator:
-        """Create the appropriate frame iterator for the given source."""
+    async def create(cls, src_url: str, stream_options: 'StreamOptions',
+                     resolved_url: Optional[str] = None, http_opts: Optional[dict] = None) -> FrameIterator:
+        """Create and initialize the appropriate frame iterator for the given source.
+
+        Args:
+            src_url: Source URL to create iterator for
+            stream_options: Streaming configuration options
+            resolved_url: Optional resolved URL (for YouTube, etc.)
+            http_opts: Optional HTTP options for the iterator
+        """
         _ensure_iterators_registered()
 
         for name, iterator_class in cls._iterators.items():
-            # Check compatibility without creating an instance
             if iterator_class.can_handle(src_url):  # type: ignore[attr-defined]  # can_handle is a class method on all registered iterators
-                return iterator_class(src_url, stream_options)
+                iterator = iterator_class(src_url, stream_options)
+
+                # Set optional properties before initialization (for PyAV iterators)
+                if resolved_url and hasattr(iterator, 'real_src_url'):
+                    iterator.real_src_url = resolved_url
+                if http_opts and hasattr(iterator, 'http_opts'):
+                    iterator.http_opts = http_opts
+
+                # Initialize the iterator
+                await iterator.async_init()
+                return iterator
 
         raise ValueError(f"No frame iterator available for source: {src_url}")
 

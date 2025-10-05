@@ -7,7 +7,8 @@ import socket
 import struct
 import time
 from collections import deque
-from typing import Dict, Any, Optional, Iterator, Tuple
+from contextlib import asynccontextmanager
+from typing import Dict, Any, Optional, Iterator, Tuple, Callable
 
 from .protocol import BufferedOutputProtocol, OutputProtocol, OutputTarget, FrameMetadata, OutputProtocolFactory
 from ..media.processing import rgb888_to_565_bytes
@@ -156,8 +157,19 @@ class DDPOutput(BufferedOutputProtocol):
         return (target_ip, output_id)
 
 
-    async def ensure_exclusive_access(self, stream_key: Tuple[str, int]) -> None:
-        """Ensure no conflicting streams exist globally across all DDP instances."""
+    async def create_and_register_stream(self, stream_key: Tuple[str, int], task_factory: Callable[[], asyncio.Task]) -> asyncio.Task:
+        """Atomically ensure exclusive access, create task, and register stream.
+
+        This method holds the lock during conflict resolution, task creation, and registration
+        to prevent race conditions.
+
+        Args:
+            stream_key: Tuple of (target_ip, output_id)
+            task_factory: Callable that creates and returns the stream task
+
+        Returns:
+            The created and registered task
+        """
         target_ip, out_id = stream_key
 
         # Get or create lock for this stream key
@@ -169,14 +181,19 @@ class DDPOutput(BufferedOutputProtocol):
         logging.getLogger('ddp').debug(f"acquiring lock for {target_ip}:{out_id}")
         async with lock:
             logging.getLogger('ddp').debug(f"lock acquired for {target_ip}:{out_id}, checking conflicts...")
+            # Cancel any conflicting streams while holding lock
             await self._ensure_no_global_conflict_locked(stream_key)
+
+            # Create task while holding lock (no conflicts exist)
+            logging.getLogger('ddp').debug(f"creating new stream task for {target_ip}:{out_id}")
+            task = task_factory()
+
+            # Register stream while still holding lock
+            DDPOutput._global_streams[stream_key] = task
+            logging.getLogger('ddp').debug(f"registered new stream task for {target_ip}:{out_id}")
         logging.getLogger('ddp').debug(f"lock released for {target_ip}:{out_id}")
 
-    async def register_stream(self, stream_key: Tuple[str, int], task: asyncio.Task) -> None:
-        """Register DDP stream in global registry"""
-        target_ip, out_id = stream_key
-        DDPOutput._global_streams[stream_key] = task
-        logging.getLogger('ddp').debug(f"registered new stream task for {target_ip}:{out_id}")
+        return task
 
     async def cleanup_stream(self, stream_key: Tuple[str, int], task: asyncio.Task) -> None:
         """Clean up DDP stream from global registry"""

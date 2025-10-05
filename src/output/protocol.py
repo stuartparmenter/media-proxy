@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union, Tuple
+from typing import Dict, Any, Optional, Union, Tuple, Callable
 from dataclasses import dataclass
+from contextlib import asynccontextmanager
 import asyncio
 import logging
 import time
@@ -82,13 +83,19 @@ class OutputProtocol(ABC):
         """Generate stream key for conflict detection. Return None if no conflicts possible."""
         return None  # Default: no conflicts
 
-    async def ensure_exclusive_access(self, stream_key: Any) -> None:
-        """Ensure exclusive access to the stream target. Default: no-op (no exclusivity needed)."""
-        pass
+    async def create_and_register_stream(self, stream_key: Any, task_factory: Callable[[], 'asyncio.Task']) -> 'asyncio.Task':
+        """Atomically ensure exclusive access, create task, and register stream.
 
-    async def register_stream(self, stream_key: Any, task: 'asyncio.Task') -> None:
-        """Register an active stream. Default: no-op."""
-        pass
+        Args:
+            stream_key: Key identifying the stream target
+            task_factory: Callable that creates and returns the stream task
+
+        Returns:
+            The created task
+
+        Default implementation: just create the task (no conflict resolution).
+        """
+        return task_factory()
 
     async def cleanup_stream(self, stream_key: Any, task: 'asyncio.Task') -> None:
         """Clean up stream registration. Default: no-op."""

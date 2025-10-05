@@ -6,6 +6,7 @@ from aiohttp import web
 
 from ..control.websocket import websocket_handler
 from .convert.animimg import handle_animimg_request
+from .internal.placeholder import handle_placeholder_request
 
 
 async def health_check_handler(request):
@@ -23,6 +24,9 @@ async def create_app():
     # HTTP API endpoints (new functionality)
     app.router.add_post('/api/convert/animimg', handle_animimg_request)
     app.router.add_get('/api/system/health', health_check_handler)
+
+    # Internal protocol endpoints
+    app.router.add_get('/api/internal/placeholder/{spec:.*}', handle_placeholder_request)
 
     return app
 

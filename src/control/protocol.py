@@ -13,10 +13,11 @@ from .handlers import ControlHandlerRegistry
 class ControlSession:
     """Represents a client control session."""
 
-    def __init__(self, client_id: str, client_ip: str, websocket: WebSocketResponse):
+    def __init__(self, client_id: str, client_ip: str, websocket: WebSocketResponse, server_host: str):
         self.client_id = client_id
         self.client_ip = client_ip
         self.websocket = websocket
+        self.server_host = server_host
         self.device_id: Optional[str] = None
         self.active_streams: Dict[Any, asyncio.Task] = {}  # stream_key -> task
         self.created_at = asyncio.get_event_loop().time()
@@ -51,19 +52,22 @@ class ControlProtocol(ABC):
         # Get stream key using control handlers
         stream_key = ControlHandlerRegistry.get_stream_key(session, params)
 
-        # Create output protocol and let it handle conflict resolution if needed
+        # Create output protocol
         output = self._create_output_protocol(params)
-        if stream_key is not None:
-            await output.ensure_exclusive_access(stream_key)
 
-        # Create and track stream
-        stream_task = await self._create_stream_task(session, params)
-        session_key = stream_key if stream_key is not None else f"stream_{id(stream_task)}"
-        session.active_streams[session_key] = stream_task
-
-        # Register stream with output protocol if needed
+        # Atomically ensure exclusive access, create task, and register
         if stream_key is not None:
-            await output.register_stream(stream_key, stream_task)
+            stream_task = await output.create_and_register_stream(
+                stream_key,
+                lambda: self._create_stream_task(session, params)
+            )
+            session_key = stream_key
+            session.active_streams[session_key] = stream_task
+        else:
+            # No locking needed (no stream key = no conflicts possible)
+            stream_task = self._create_stream_task(session, params)
+            session_key = f"stream_{id(stream_task)}"
+            session.active_streams[session_key] = stream_task
 
         # Get applied params for response
         applied_params = ControlFields.extract_applied_params(params)
@@ -111,17 +115,17 @@ class ControlProtocol(ABC):
         # Stop existing stream
         await self._stop_stream_internal(session, stream_key, output)
 
-        # Let output protocol handle conflict resolution if needed
+        # Atomically ensure exclusive access, create task, and register
         if stream_key is not None:
-            await output.ensure_exclusive_access(stream_key)
-
-        # Create new stream
-        stream_task = await self._create_stream_task(session, base_params)
-        session.active_streams[session_key] = stream_task
-
-        # Register with output protocol if needed
-        if stream_key is not None:
-            await output.register_stream(stream_key, stream_task)
+            stream_task = await output.create_and_register_stream(
+                stream_key,
+                lambda: self._create_stream_task(session, base_params)
+            )
+            session.active_streams[session_key] = stream_task
+        else:
+            # No locking needed (no stream key = no conflicts possible)
+            stream_task = self._create_stream_task(session, base_params)
+            session.active_streams[session_key] = stream_task
 
         # Get applied params for response
         applied_params = ControlFields.extract_applied_params(updatable_params)
@@ -152,7 +156,7 @@ class ControlProtocol(ABC):
                     logging.getLogger('protocol').error(f"stream cleanup error {session_key}: {e!r}")
 
     @abstractmethod
-    async def _create_stream_task(self, session: ControlSession, params: Dict[str, Any]) -> asyncio.Task:
+    def _create_stream_task(self, session: ControlSession, params: Dict[str, Any]) -> asyncio.Task:
         """Create and start a new streaming task. Must be implemented by subclasses."""
         pass
 

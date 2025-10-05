@@ -14,7 +14,7 @@ from ..config import Config
 
 from ..utils.fields import ControlFields
 from .options import StreamOptions
-from ..media.sources import resolve_media_source, MediaUnavailableError
+from ..media.sources import resolve_media_source, MediaUnavailableError, is_internal_url, rewrite_internal_url
 from ..media.protocol import FrameIteratorFactory
 from ..media.images import cleanup_active_image_sources
 from ..output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata
@@ -67,24 +67,24 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
     # Retry loop for YouTube URL expiration
     while True:
         try:
-            # Create iterator (handles looping internally)
-            iterator = FrameIteratorFactory.create(src_url, stream_options)
+            # Prepare HTTP options with resilience settings for YouTube
+            http_options = None
+            if is_youtube_url(src_url) and source_options:
+                http_options = source_options.copy()
+                http_options.update({
+                    'reconnect': '1',
+                    'reconnect_streamed': '1',
+                    'reconnect_delay_max': '5',
+                    'timeout': '10000000',
+                })
 
-            # If this is a PyAV iterator and we have a resolved URL, update it
-            if hasattr(iterator, 'real_src_url'):
-                iterator.real_src_url = resolved_url
-
-                # Add HTTP resilience options for YouTube DASH/HLS streams
-                if hasattr(iterator, 'http_opts') and source_options:
-                    iterator.http_opts = source_options.copy()
-                    # Add FFmpeg protocol options for connection resilience
-                    iterator.http_opts.update({
-                        'reconnect': '1',           # Enable auto-reconnect on connection loss
-                        'reconnect_streamed': '1',  # Reconnect for streamed/chunked content (DASH)
-                        'reconnect_delay_max': '5', # Max 5 seconds between retry attempts
-                        'timeout': '10000000',      # 10 second read timeout (in microseconds)
-                    })
-                    logging.getLogger('streaming').debug(f"Added HTTP resilience options for YouTube stream")
+            # Create and initialize iterator (factory handles property setting)
+            iterator = await FrameIteratorFactory.create(
+                src_url,
+                stream_options,
+                resolved_url=resolved_url if is_youtube_url(src_url) else None,
+                http_opts=http_options
+            )
 
             # Iterate frames - the iterator handles looping internally
             frames_yielded = False
@@ -145,9 +145,15 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
             break
 
 
-async def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task:
+def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task:
     """Create a streaming task that connects media input to output."""
     config = Config()
+
+    # Resolve internal: URLs using session's server info
+    src = params.get("src")
+    if src and is_internal_url(src):
+        params = params.copy()  # Don't mutate original
+        params["src"] = rewrite_internal_url(src, session.server_host)
 
     # Create strongly typed streaming options from control parameters
     stream_options = StreamOptions.from_control_params(params)

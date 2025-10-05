@@ -5,6 +5,8 @@ import numpy as np
 from PIL import Image
 from typing import Iterator, Tuple, Dict, List, Optional, Any
 import urllib.request
+import urllib.error
+import aiohttp
 from io import BytesIO
 import tempfile
 import os
@@ -218,8 +220,8 @@ class LocalFileSource(ImageSource):
             pass
 
 
-def _create_image_source(src_url: str) -> ImageSource:
-    """Create image source - optimized for local files, BytesIO for small remote images, temp file for large ones."""
+async def _create_image_source(src_url: str) -> ImageSource:
+    """Create image source using async HTTP fetching (aiohttp) to avoid blocking event loop."""
     try:
         # For file:// URLs, use local file directly (no copying needed)
         local_path = resolve_local_path(src_url)
@@ -231,19 +233,23 @@ def _create_image_source(src_url: str) -> ImageSource:
 
             return LocalFileSource(local_path)
 
-        # For HTTP/HTTPS URLs, download and use BytesIO or temp file
-        req = urllib.request.Request(src_url)
-        req.add_header('User-Agent', Config().get("net.user_agent"))
+        # For HTTP/HTTPS URLs, fetch with aiohttp (non-blocking)
+        async with aiohttp.ClientSession() as session:
+            headers = {'User-Agent': Config().get("net.user_agent")}
+            timeout = aiohttp.ClientTimeout(total=30)
 
-        with urllib.request.urlopen(req) as response:
-            # Check content length if available
-            content_length = response.headers.get('Content-Length')
-            if content_length:
-                size = int(content_length)
-                if size > MAX_SIZE_LIMIT:
-                    raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
+            async with session.get(src_url, headers=headers, timeout=timeout) as response:
+                response.raise_for_status()
 
-            data = response.read()
+                # Check content length if available
+                content_length = response.headers.get('Content-Length')
+                if content_length:
+                    size = int(content_length)
+                    if size > MAX_SIZE_LIMIT:
+                        raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
+
+                # Read data asynchronously
+                data = await response.read()
 
         # Check actual size after download
         actual_size = len(data)
@@ -260,8 +266,11 @@ def _create_image_source(src_url: str) -> ImageSource:
             temp_path = temp_file.name
         return TempFileSource(temp_path)
 
-    except (urllib.error.HTTPError, urllib.error.URLError, FileNotFoundError):
-        # Re-raise HTTP/network errors and file not found for upstream handling
+    except aiohttp.ClientError as e:
+        # Convert to URLError for compatibility with existing error handling
+        raise urllib.error.URLError(str(e)) from e
+    except FileNotFoundError:
+        # Re-raise file not found for upstream handling
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to create image source: {e}") from e
@@ -288,6 +297,10 @@ class PilFrameIterator(FrameIterator):
         self._cache_memory_usage = 0
         self._cache_stats = {"hits": 0, "misses": 0, "evictions": 0}
         self._first_loop_complete = False
+
+    async def async_init(self):
+        """Async initialization to fetch image source without blocking event loop."""
+        self._img_source = await _create_image_source(self.src_url)
 
     @classmethod
     def can_handle(cls, src_url: str) -> bool:
@@ -347,7 +360,9 @@ class PilFrameIterator(FrameIterator):
             logging.getLogger('images').debug(f"evicted cache entry for {self.src_url} (saved {old_size} bytes)")
 
     def __iter__(self) -> Iterator[Tuple[bytes, float]]:
-        """Iterate frames from static images or animated GIFs with proper disposal handling."""
+        """Iterate frames - image source must be initialized via async_init() first."""
+        assert self._img_source is not None, "Image source not initialized. Call async_init() before iteration."
+
         config = Config()
         size = self.stream_options.size
         loop_video = self.stream_options.loop
@@ -355,8 +370,7 @@ class PilFrameIterator(FrameIterator):
         # Default fallback delay (for images without timing info)
         default_delay_ms = 100.0  # 10 FPS
 
-        # Create optimized image source (memory vs temp file)
-        self._img_source = _create_image_source(self.src_url)
+        # Use pre-fetched image source
         img_source = self._img_source  # Local reference for type narrowing
 
         try:

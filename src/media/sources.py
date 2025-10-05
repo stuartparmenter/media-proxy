@@ -4,12 +4,43 @@
 import asyncio
 import logging
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse, urlunparse
 
 import yt_dlp
 
 from ..config import Config
 from ..utils.helpers import is_youtube_url, headers_dict_to_ffmpeg_opt
+
+
+def is_internal_url(url: str) -> bool:
+    """Check if URL uses internal: protocol"""
+    return url.startswith("internal:")
+
+
+def rewrite_internal_url(url: str, server_host: str) -> str:
+    """Rewrite internal: URL to localhost HTTP URL using urllib
+
+    Args:
+        url: internal: URL to rewrite (e.g., internal:placeholder/64x64)
+        server_host: Host from request.host (includes port, e.g., '192.168.1.1:8788')
+
+    Examples:
+        internal:placeholder/64x64 -> http://192.168.1.1:8788/api/internal/placeholder/64x64
+        internal:placeholder/64x64/ff0000?text=Hi -> http://192.168.1.1:8788/api/internal/placeholder/64x64/ff0000?text=Hi
+    """
+    parsed = urlparse(url)
+    new_path = f"/api/internal/{parsed.path}"
+
+    rewritten = urlunparse((
+        'http',
+        server_host,
+        new_path,
+        '',
+        parsed.query,
+        ''
+    ))
+
+    return rewritten
 
 
 def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: bool = True) -> Tuple[str, None]:

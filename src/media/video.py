@@ -156,6 +156,27 @@ class PyAvFrameIterator(FrameIterator):
         super().__init__(src_url, stream_options)
         self.real_src_url = src_url  # May be updated for YouTube URLs
         self.http_opts: Dict[str, Any] = {}  # May be updated for YouTube URLs
+        self._container = None  # Will be set by async_init if called
+        self._vstream = None
+
+    async def async_init(self):
+        """Async initialization to open stream without blocking event loop."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        # Determine URL to open
+        pyav_url = self.real_src_url
+        if self.stream_options.enable_cache:
+            pyav_url = f"cache:{pyav_url}"
+
+        # Run av.open in thread executor to avoid blocking
+        self._container, self._vstream = await loop.run_in_executor(
+            None,
+            open_stream,
+            pyav_url,
+            self.stream_options.hw,
+            self.http_opts
+        )
 
     @classmethod
     def can_handle(cls, src_url: str) -> bool:
@@ -246,10 +267,12 @@ class PyAvFrameIterator(FrameIterator):
                               for k, v in self.http_opts.items()}
                 logging.getLogger('video').debug(f"HTTP options: {debug_opts}")
 
-            # Open container once before the loop
-            container, vstream = open_stream(pyav_url, self.stream_options.hw, options=self.http_opts)
-            if vstream is None:
-                raise RuntimeError("no video stream")
+            # Use pre-opened container from async_init
+            assert self._container is not None and self._vstream is not None, \
+                "Container not initialized. Must call async_init() before iteration."
+
+            container = self._container
+            vstream = self._vstream
 
             # Default frame delay if timestamps are missing
             avg_ms: Optional[float] = None

@@ -49,9 +49,9 @@ class WebSocketControlProtocol(ControlProtocol):
             "message": message
         })
 
-    async def _create_stream_task(self, session: ControlSession, params: Dict[str, Any]) -> asyncio.Task:
+    def _create_stream_task(self, session: ControlSession, params: Dict[str, Any]) -> asyncio.Task:
         """Create and start a new streaming task."""
-        return await create_streaming_task(session, params)
+        return create_streaming_task(session, params)
 
     async def handle_websocket(self, ws: WebSocketResponse, request):
         """Handle a WebSocket connection using aiohttp."""
@@ -60,7 +60,8 @@ class WebSocketControlProtocol(ControlProtocol):
         session = ControlSession(
             client_id=f"ws-{id(ws)}",
             client_ip=remote_addr if remote_addr else "unknown",
-            websocket=ws
+            websocket=ws,
+            server_host=request.host
         )
 
         try:
