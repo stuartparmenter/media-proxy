@@ -7,6 +7,7 @@ from aiohttp import web
 
 from ..control.websocket import websocket_handler
 from .convert.animimg import handle_animimg_request
+from .internal.homeassistant import handle_homeassistant_request
 from .internal.placeholder import handle_placeholder_request
 
 
@@ -28,6 +29,7 @@ async def create_app():
 
     # Internal protocol endpoints
     app.router.add_get("/api/internal/placeholder/{spec:.*}", handle_placeholder_request)
+    app.router.add_get("/api/internal/homeassistant/{spec:.*}", handle_homeassistant_request)
 
     return app
 

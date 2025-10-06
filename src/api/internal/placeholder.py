@@ -73,6 +73,15 @@ async def handle_placeholder_request(request):
         /placeholder/600x400/ff0000.png
         /placeholder/800.png?text=Hello+World
     """
+    # HEAD request optimization - return headers immediately without any processing
+    if request.method == "HEAD":
+        return web.Response(
+            content_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
+            },
+        )
+
     try:
         # Parse path: {width}x{height}[/{bg_color}[/{text_color}]].ext
         spec = request.match_info.get("spec", "")
