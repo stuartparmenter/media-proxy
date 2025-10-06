@@ -28,9 +28,17 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r src/requirements.txt -c src/constraints.txt
 
-    - name: Install type checking dependencies
+    - name: Install dev dependencies (type checkers, linters)
       run: |
         pip install -r src/requirements-dev.txt
+
+    - name: Run Ruff linter
+      run: |
+        ruff check src/
+
+    - name: Run Ruff formatter check
+      run: |
+        ruff format --check src/
 
     - name: Run mypy type checker
       run: |
