@@ -53,7 +53,7 @@ def _get_normalized_disposal_method(pil_img: Image.Image) -> int:
     """
     # Try GIF format first (has disposal_method attribute)
     if hasattr(pil_img, 'disposal_method'):
-        gif_disposal = pil_img.disposal_method
+        gif_disposal = pil_img.disposal_method  # type: ignore[attr-defined]
         # GIF: 0/1=none, 2=background, 3=previous → normalize to 0,1,2
         if gif_disposal in (0, 1):
             return DisposalMethod.NONE
@@ -88,7 +88,7 @@ def _get_normalized_blend_mode(pil_img: Image.Image) -> int:
     """
     # Try APNG format (has blend_op attribute)
     if hasattr(pil_img, 'blend_op'):
-        apng_blend = pil_img.blend_op
+        apng_blend = pil_img.blend_op  # type: ignore[attr-defined]
         # APNG: 0=source, 1=over → reverse to match our constants
         if apng_blend == 0:
             return BlendMode.SOURCE

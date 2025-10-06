@@ -15,5 +15,5 @@ sys.path.insert(0, parent_dir)
 
 if __name__ == "__main__":
     # Import and run the main function from the package
-    from src.main import run
+    from src.main import run  # type: ignore[import-untyped]
     run()

@@ -202,7 +202,7 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
             "listformats": True,
         }
         try:
-            with yt_dlp.YoutubeDL(debug_opts) as debug_ydl:
+            with yt_dlp.YoutubeDL(debug_opts) as debug_ydl:  # type: ignore[arg-type]
                 debug_ydl.extract_info(src_url, download=False)
         except Exception:
             pass  # Don't fail if debug listing fails
@@ -212,7 +212,7 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
     
     def _extract_info():
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
             info = ydl.extract_info(src_url, download=False)
             if info is None:
                 return src_url, {}, {}
@@ -260,10 +260,10 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
     
     try:
         # Run in thread pool to avoid blocking the event loop
-        return await loop.run_in_executor(None, _extract_info)
+        return await loop.run_in_executor(None, _extract_info)  # type: ignore[return-value]
     except Exception as e:
         logger = logging.getLogger('sources')
-        if isinstance(e, yt_dlp.DownloadError):
+        if isinstance(e, yt_dlp.DownloadError):  # type: ignore[attr-defined]
             # Re-raise DownloadError for proper handling upstream
             logger.warning(f"URL resolution failed for {src_url}: {e!r}")
             raise

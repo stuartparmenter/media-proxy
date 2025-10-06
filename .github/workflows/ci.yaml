@@ -32,9 +32,13 @@ jobs:
       run: |
         pip install -r src/requirements-dev.txt
 
-    - name: Run type checker
+    - name: Run mypy type checker
       run: |
         mypy src/
+
+    - name: Run pyright type checker
+      run: |
+        cd src && pyright --pythonpath $(which python) .
 
     - name: Smoke test - verify application loads
       run: |

@@ -17,7 +17,7 @@ from .options import StreamOptions
 from ..media.sources import resolve_media_source, MediaUnavailableError, is_internal_url, rewrite_internal_url
 from ..media.protocol import FrameIteratorFactory
 from ..media.images import cleanup_active_image_sources
-from ..output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata
+from ..output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata, BufferedOutputProtocol
 from ..utils.helpers import is_youtube_url
 
 
@@ -56,7 +56,7 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
                 stream_options.enable_cache = True
 
         except Exception as e:
-            if isinstance(e, yt_dlp.DownloadError):
+            if isinstance(e, yt_dlp.DownloadError):  # type: ignore[attr-defined]
                 # YouTube format unavailable - re-raise for upstream handling
                 logging.getLogger('streaming').error(f"YouTube DownloadError: {e}")
                 raise MediaUnavailableError(f"YouTube resolution failed: {e}", original_src, e) from e
@@ -220,7 +220,7 @@ async def streaming_task(stream_options: StreamOptions):
         return
     finally:
         # For non-looping content, ensure all packets are fully sent
-        if not stream_options.loop and hasattr(output, 'flush_and_stop'):
+        if not stream_options.loop and isinstance(output, BufferedOutputProtocol):
             await output.flush_and_stop()
         else:
             await output.stop()

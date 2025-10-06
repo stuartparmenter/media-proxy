@@ -112,7 +112,7 @@ class DDPOutput(BufferedOutputProtocol):
     def __init__(self, target: OutputTarget, stream_options):
         super().__init__(target, stream_options)
 
-        self.sender: Optional[DDPSender] = None
+        self.sender: DDPSender  # Initialized in start()
         self.transport: Optional[asyncio.DatagramTransport] = None
         self.socket: Optional[socket.socket] = None
         self.seq = 0

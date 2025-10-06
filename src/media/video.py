@@ -8,7 +8,9 @@ import os
 from typing import Iterator, Tuple, Dict, Optional, Any, List
 import av
 from av.codec.hwaccel import HWAccel
+from av.error import FFmpegError, HTTPError, HTTPClientError, HTTPServerError
 from av.filter import Graph as AvFilterGraph
+from av.video.frame import VideoFrame
 
 from ..config import Config
 from .protocol import FrameIterator
@@ -40,7 +42,7 @@ def open_stream(src_url: str, hw_backend: Optional[str], options: Optional[Dict[
     except OSError as e:
         # Re-raise OS errors with original URL for better error messages
         raise OSError(f"cannot open media file: {src_url}") from e
-    except av.error.FFmpegError as e:
+    except FFmpegError as e:
         # Re-raise FFmpeg errors with original URL
         raise RuntimeError(f"FFmpeg error opening {src_url}: {e}") from e
 
@@ -459,6 +461,9 @@ class PyAvFrameIterator(FrameIterator):
                     # decode() may return 0..N frames (depending on codec & B-frames)
                     frames = packet.decode()
                     for frame in frames:
+                        # PyAV packet.decode() stub is incomplete - returns VideoFrame for video streams
+                        if not isinstance(frame, VideoFrame):
+                            continue  # Skip non-video frames (shouldn't happen with video stream)
                         saw_frame = True
                         # Auto-crop sampling on early frames (before building graph)
                         if ac_enabled and not ac_decided and ac_seen < ac_probe_frames:
@@ -542,7 +547,7 @@ class PyAvFrameIterator(FrameIterator):
                     # Not looping - exit after first iteration
                     break
 
-        except (av.error.HTTPError, av.error.HTTPClientError, av.error.HTTPServerError) as e:
+        except (HTTPError, HTTPClientError, HTTPServerError) as e:
             # HTTP errors - re-raise for upstream handling (streaming layer will decide if retry needed)
             raise
         except FileNotFoundError as e:
