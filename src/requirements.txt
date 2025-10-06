@@ -1,5 +1,6 @@
 aiohttp>=3.8,<4
 av>=15,<16
+filetype>=1.2,<2
 numpy>=2,<3
 pillow>=10,<13
 imageio-ffmpeg>=0.6,<1

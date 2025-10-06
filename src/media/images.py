@@ -312,14 +312,28 @@ class PilFrameIterator(FrameIterator):
         self._img_source = await _create_image_source(self.src_url)
 
     @classmethod
-    def can_handle(cls, src_url: str) -> bool:
-        """Check if this is an image file we can handle."""
+    def can_handle(cls, src_url: str, content_type: str | None = None) -> bool:
+        """Check if this is an image file we can handle.
+
+        Args:
+            src_url: Source URL to check
+            content_type: Optional Content-Type header from HTTP HEAD request
+
+        Returns:
+            True if this iterator can handle the source
+        """
         try:
             from urllib.parse import urlparse
 
+            # If content type is available, use it for detection
+            if content_type:
+                content_type_lower = content_type.lower().split(";")[0].strip()
+                if content_type_lower.startswith("image/"):
+                    return True
+
             # Parse URL to get path without query parameters
-            parsed = urlparse(src_url.lower())
-            path = parsed.path if parsed.path else src_url.lower()
+            parsed = urlparse(src_url)
+            path = parsed.path.lower() if parsed.path else ""
 
             image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
             return any(path.endswith(ext) for ext in image_extensions)

@@ -172,15 +172,33 @@ class PyAvFrameIterator(FrameIterator):
         )
 
     @classmethod
-    def can_handle(cls, src_url: str) -> bool:
-        """Check if this is a video file or stream we can handle."""
+    def can_handle(cls, src_url: str, content_type: str | None = None) -> bool:
+        """Check if this is a video file or stream we can handle.
+
+        Args:
+            src_url: Source URL to check
+            content_type: Optional Content-Type header from HTTP HEAD request
+
+        Returns:
+            True if this iterator can handle the source
+        """
         try:
             from urllib.parse import urlparse
 
-            # Parse URL to get path without query parameters
-            parsed = urlparse(src_url.lower())
-            path = parsed.path if parsed.path else src_url.lower()
-            lower_url = src_url.lower()
+            # If content type is available, use it for detection
+            if content_type:
+                content_type_lower = content_type.lower().split(";")[0].strip()
+                # Reject images - let PIL handle them
+                if content_type_lower.startswith("image/"):
+                    return False
+                # Accept video types
+                if content_type_lower.startswith("video/") or content_type_lower.startswith("application/"):
+                    return True
+
+            # Parse URL to get path and scheme
+            parsed = urlparse(src_url)
+            path = parsed.path.lower() if parsed.path else ""
+            scheme = parsed.scheme.lower()
 
             # First, check if this looks like an image that PIL should handle
             image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
@@ -192,19 +210,18 @@ class PyAvFrameIterator(FrameIterator):
             if any(path.endswith(ext) for ext in video_extensions):
                 return True
 
-            # Streaming protocols (but be careful with HTTP images)
-            streaming_prefixes = ("rtmp://", "rtsp://", "udp://", "tcp://")
-            if any(lower_url.startswith(prefix) for prefix in streaming_prefixes):
+            # Streaming protocols
+            if scheme in ("rtmp", "rtsp", "udp", "tcp"):
                 return True
 
-            # HTTP/HTTPS URLs - accept these as potential video streams
-            # (but PIL will get first chance at obvious image URLs)
-            if lower_url.startswith(("http://", "https://")):
+            # HTTP/HTTPS URLs without content-type or extension info - accept as fallback
+            # (PIL will get first chance via content-type detection)
+            if scheme in ("http", "https"):
                 return True
 
             # Local file without clear extension - let PyAV try to handle it as video
-            # (but only if it's not an obvious image extension)
-            return bool(not lower_url.startswith(("http://", "https://")))
+            # (but only if it's not http/https, which we already checked above)
+            return scheme not in ("http", "https")
         except Exception:
             return False
 
