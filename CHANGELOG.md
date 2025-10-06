@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `internal:homeassistant` protocol for rendering Home Assistant entity states and templates to PNG
+  - Entity mode: `internal:homeassistant/64x64.png?entity=sensor.name` (recommended)
+  - Template mode: `internal:homeassistant/64x64.png?template={{ states('sensor.temp') }}` (fallback)
+  - Development mode support via `HA_TOKEN` and `HA_URL` environment variables for testing outside addon
+  - HEAD request optimization for efficient probing without rendering
+- BBCode text rendering support for `internal:homeassistant` protocol
+  - Word wrapping based on pixel width (not character count) for accurate text layout
+  - Spleen bitmap fonts (5x8, 6x12, 8x16) for crisp LED display rendering
+  - BBCode tags for rich text formatting:
+    - `[color=red]...[/color]` or `[red]...[/red]` - Text colors (named or hex)
+    - `[font=8x16]...[/font]` - Font size selection
+    - `[left]`, `[center]`, `[right]` - Text alignment
+    - `[b]...[/b]` - Bold text (simulated with double-draw)
+  - URL query parameters: `?font=8x16&align=center` for default font and alignment
+  - Plain text still works without any tags (backward compatible)
+  - Material Design Icons webfont bundled (for future icon support)
+- Third-party license documentation in `THIRD_PARTY_LICENSES.md` for bundled fonts
+
+### Changed
+- `internal:homeassistant` now uses Spleen 8x16 bitmap font by default (was PIL default font)
+- `internal:placeholder` now defaults to black background instead of gray (better for LED displays)
+- HEAD request optimization moved to top of handlers for maximum efficiency
+
 ## [0.5.1] - 2025-10-01
 
 ### Fixed

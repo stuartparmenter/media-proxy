@@ -1,20 +1,22 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
+import io
 import logging
 from urllib.parse import unquote_plus
 
 import aiohttp
 from aiohttp import web
 
+from ...render.bbcode_renderer import render_bbcode_text
 from ...utils.ha_client import HomeAssistantClient
-from .placeholder import auto_contrast_color, generate_placeholder_png, parse_color
+from .placeholder import auto_contrast_color, parse_color
 
 
 async def handle_homeassistant_request(request):
     """Handle GET /api/internal/homeassistant/{spec}
 
-    Renders Home Assistant entity state or template to PNG image.
+    Renders Home Assistant entity state or template to PNG image with BBCode support.
 
     URL patterns (extension required):
         # Entity mode (recommended - uses Template Helper)
@@ -24,6 +26,13 @@ async def handle_homeassistant_request(request):
         # Template mode (fallback - for quick prototyping)
         /homeassistant/64x64.png?template={{ states('sensor.temp') }}
         /homeassistant/800.png?template={{ now().strftime('%H:%M') }}
+
+    BBCode support (in entity state or template result):
+        [color=red]text[/color] or [red]text[/red] - Text color
+        [font=8x16]text[/font] - Font size (5x8, 6x12, 8x16)
+        [left], [center], [right] - Text alignment
+        [b]text[/b] - Bold text (simulated)
+        Plain text works without any tags (automatic word wrapping)
     """
     logger = logging.getLogger("homeassistant")
 
@@ -112,8 +121,19 @@ async def handle_homeassistant_request(request):
         # Replace literal \n with actual newlines for multiline support
         rendered_text = rendered_text.replace("\\n", "\n")
 
-        # Generate PNG
-        png_data = generate_placeholder_png(width, height, bg_color, text_color, rendered_text)
+        # Render text with BBCode support
+        img = render_bbcode_text(
+            rendered_text,
+            width,
+            height,
+            default_fg=text_color,
+            bg_color=bg_color,
+        )
+
+        # Convert PIL Image to PNG bytes
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        png_data = buffer.getvalue()
 
         return web.Response(
             body=png_data,
