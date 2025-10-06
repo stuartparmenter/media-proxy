@@ -6,7 +6,7 @@ psutil==7.1.0
 PyYAML==6.0.3
 # yt-dlp extra dependencies (base package cannot be constrained when using extras)
 brotli==1.1.0
-certifi==2025.8.3
+certifi==2025.10.5
 mutagen==1.47.0
 pycryptodomex==3.23.0
 requests==2.32.5
