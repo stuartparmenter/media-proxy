@@ -2,9 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import os
-from urllib.parse import urlparse, unquote
-from typing import Optional, Dict, Tuple
-import urllib.request
+from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 
@@ -13,9 +11,7 @@ def is_youtube_url(url: str) -> bool:
     try:
         p = urlparse(url)
         host = (p.netloc or "").lower()
-        return any(h in host for h in (
-            "youtube.com", "youtu.be", "youtube-nocookie.com"
-        ))
+        return any(h in host for h in ("youtube.com", "youtu.be", "youtube-nocookie.com"))
     except Exception:
         return False
 
@@ -29,7 +25,7 @@ def is_http_url(url: str) -> bool:
         return False
 
 
-def resolve_local_path(src_url: str) -> Optional[str]:
+def resolve_local_path(src_url: str) -> str | None:
     """Convert a file:// URL or local path to an absolute file path."""
     u = urlparse(src_url)
     if u.scheme in ("", "file"):
@@ -40,9 +36,7 @@ def resolve_local_path(src_url: str) -> Optional[str]:
     return None
 
 
-
-
-def headers_dict_to_ffmpeg_opt(headers: Dict[str, str]) -> str:
+def headers_dict_to_ffmpeg_opt(headers: dict[str, str]) -> str:
     """
     FFmpeg's libavformat expects a single CRLF-delimited string in the `headers`
     option. Must end with a trailing CRLF.
@@ -60,9 +54,7 @@ def headers_dict_to_ffmpeg_opt(headers: Dict[str, str]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-
-
-def compute_spacing_and_group(pkt_count: int, frame_interval_s: float) -> Tuple[Optional[float], int]:
+def compute_spacing_and_group(pkt_count: int, frame_interval_s: float) -> tuple[float | None, int]:
     """
     Compute (spacing_s, group_n) for packet spreading.
 
@@ -70,6 +62,7 @@ def compute_spacing_and_group(pkt_count: int, frame_interval_s: float) -> Tuple[
     group_n:   number of packets sent per timeslot (then sleep once)
     """
     import math
+
     from ..config import Config
 
     if pkt_count <= 0 or frame_interval_s <= 0.0:
@@ -97,5 +90,3 @@ def compute_spacing_and_group(pkt_count: int, frame_interval_s: float) -> Tuple[
         spacing = frame_interval_s
 
     return (spacing, group_n)
-
-

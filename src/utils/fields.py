@@ -1,16 +1,17 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
-from dataclasses import dataclass, field
-from typing import Dict, Any, Set, Optional, Type, Union, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
-import os
-from urllib.parse import urlparse
 from pathlib import Path
+from typing import Any, ClassVar
+from urllib.parse import urlparse
 
 
 class FieldType(Enum):
     """Field data types for validation."""
+
     STRING = "string"
     INTEGER = "integer"
     BOOLEAN = "boolean"
@@ -20,11 +21,12 @@ class FieldType(Enum):
 @dataclass
 class FieldDef:
     """Definition of a field with type, validation, and defaults."""
+
     name: str
-    field_type: Type
-    validator: Optional[Callable[[Any], bool]] = None
-    default_factory: Optional[Callable[..., Any]] = None
-    transformer: Optional[Callable[[Any], Any]] = None
+    field_type: type
+    validator: Callable[[Any], bool] | None = None
+    default_factory: Callable[..., Any] | None = None
+    transformer: Callable[[Any], Any] | None = None
     description: str = ""
 
     def validate(self, value: Any) -> bool:
@@ -74,58 +76,71 @@ class MediaFields:
 
     WIDTH = FieldDef("w", int, lambda x: int(x) > 0, description="Display width")
     HEIGHT = FieldDef("h", int, lambda x: int(x) > 0, description="Display height")
-    SOURCE = FieldDef("src", str, validator=lambda x: len(str(x).strip()) > 0, transformer=_normalize_source_url, description="Media source (file, URL, etc.)")
+    SOURCE = FieldDef(
+        "src",
+        str,
+        validator=lambda x: len(str(x).strip()) > 0,
+        transformer=_normalize_source_url,
+        description="Media source (file, URL, etc.)",
+    )
 
-    LOOP = FieldDef("loop", bool,
-                   default_factory=lambda config: config.get("playback.loop"),
-                   description="Loop media playback")
+    LOOP = FieldDef(
+        "loop", bool, default_factory=lambda config: config.get("playback.loop"), description="Loop media playback"
+    )
 
-    HARDWARE = FieldDef("hw", str,
-                       lambda x: str(x) in ("auto", "none", "cuda", "qsv", "vaapi", "videotoolbox", "d3d11va"),
-                       default_factory=lambda config: config.get("hw.prefer"),
-                       description="Hardware acceleration preference")
+    HARDWARE = FieldDef(
+        "hw",
+        str,
+        lambda x: str(x) in ("auto", "none", "cuda", "qsv", "vaapi", "videotoolbox", "d3d11va"),
+        default_factory=lambda config: config.get("hw.prefer"),
+        description="Hardware acceleration preference",
+    )
 
-    FORMAT = FieldDef("fmt", str,
-                     lambda x: str(x) in ("rgb888", "rgb565le", "rgb565be"),
-                     default_factory=lambda: "rgb888",
-                     description="Pixel format preference")
+    FORMAT = FieldDef(
+        "fmt",
+        str,
+        lambda x: str(x) in ("rgb888", "rgb565le", "rgb565be"),
+        default_factory=lambda: "rgb888",
+        description="Pixel format preference",
+    )
 
-    FIT = FieldDef("fit", str,
-                  lambda x: str(x) in ("pad", "cover", "auto"),
-                  default_factory=lambda config: config.get("video.fit"),
-                  description="Video/image fit mode")
+    FIT = FieldDef(
+        "fit",
+        str,
+        lambda x: str(x) in ("pad", "cover", "auto"),
+        default_factory=lambda config: config.get("video.fit"),
+        description="Video/image fit mode",
+    )
 
-    EXPAND = FieldDef("expand", int,
-                     lambda x: int(x) in (0, 1, 2),
-                     default_factory=lambda config: config.get("video.expand_mode"),
-                     description="FFmpeg color range expansion (0=never, 1=auto, 2=force)")
+    EXPAND = FieldDef(
+        "expand",
+        int,
+        lambda x: int(x) in (0, 1, 2),
+        default_factory=lambda config: config.get("video.expand_mode"),
+        description="FFmpeg color range expansion (0=never, 1=auto, 2=force)",
+    )
 
 
 class ProcessingFields:
     """Fields related to output processing and frame manipulation."""
 
-    PACE = FieldDef("pace", int,
-                   lambda x: int(x) >= 0,
-                   default_factory=lambda: 0,
-                   description="Frame pacing frequency in Hz")
+    PACE = FieldDef(
+        "pace", int, lambda x: int(x) >= 0, default_factory=lambda: 0, description="Frame pacing frequency in Hz"
+    )
 
-    EMA = FieldDef("ema", float,
-                  lambda x: 0.0 <= float(x) <= 1.0,
-                  default_factory=lambda: 0.0,
-                  description="EMA filter alpha")
+    EMA = FieldDef(
+        "ema", float, lambda x: 0.0 <= float(x) <= 1.0, default_factory=lambda: 0.0, description="EMA filter alpha"
+    )
 
 
 class NetworkFields:
     """Fields related to transport and routing."""
 
-    DDP_PORT = FieldDef("ddp_port", int,
-                       lambda x: 1 <= int(x) <= 65535,
-                       default_factory=lambda: 4048,
-                       description="DDP output port")
+    DDP_PORT = FieldDef(
+        "ddp_port", int, lambda x: 1 <= int(x) <= 65535, default_factory=lambda: 4048, description="DDP output port"
+    )
 
-    OUT = FieldDef("out", int,
-                  lambda x: int(x) >= 0,
-                  description="Output ID")
+    OUT = FieldDef("out", int, lambda x: int(x) >= 0, description="Output ID")
 
 
 class ProtocolFields:
@@ -140,7 +155,7 @@ class AllFields:
     """Centralized registry of all field definitions organized by domain."""
 
     # Create a flat registry for backward compatibility
-    ALL_FIELDS: Dict[str, Any] = {}
+    ALL_FIELDS: ClassVar[dict[str, Any]] = {}
 
     def __init_subclass__(cls):
         super().__init_subclass__()
@@ -157,19 +172,31 @@ class AllFields:
                     cls.ALL_FIELDS[attr.name] = attr
 
     # Field groups for different operations (backward compatibility)
-    REQUIRED_FOR_START = {"out", "w", "h", "src"}
-    REQUIRED_FOR_STOP = {"out"}
-    REQUIRED_FOR_UPDATE = {"out"}
+    REQUIRED_FOR_START: ClassVar[set[str]] = {"out", "w", "h", "src"}
+    REQUIRED_FOR_STOP: ClassVar[set[str]] = {"out"}
+    REQUIRED_FOR_UPDATE: ClassVar[set[str]] = {"out"}
 
     # Fields that can be updated/applied
-    UPDATABLE_FIELDS = {"w", "h", "ddp_port", "src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit"}
-    APPLIED_FIELDS = {"src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit"}
+    UPDATABLE_FIELDS: ClassVar[set[str]] = {
+        "w",
+        "h",
+        "ddp_port",
+        "src",
+        "pace",
+        "ema",
+        "expand",
+        "loop",
+        "hw",
+        "fmt",
+        "fit",
+    }
+    APPLIED_FIELDS: ClassVar[set[str]] = {"src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit"}
 
     @classmethod
-    def validate_fields(cls, params: Dict[str, Any], operation: str) -> None:
+    def validate_fields(cls, params: dict[str, Any], operation: str) -> None:
         """Validate that required fields are present and valid for an operation."""
         # Get required fields for this operation
-        required: Set[str] = getattr(cls, f"REQUIRED_FOR_{operation.upper()}", set())
+        required: set[str] = getattr(cls, f"REQUIRED_FOR_{operation.upper()}", set())
 
         # Check missing fields
         missing = [f for f in required if f not in params]
@@ -185,17 +212,17 @@ class AllFields:
                     raise ValueError(f"Invalid {field_name}: {value}")
 
     @classmethod
-    def extract_applied_params(cls, params: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_applied_params(cls, params: dict[str, Any]) -> dict[str, Any]:
         """Extract parameters that were applied to the stream."""
         return {k: v for k, v in params.items() if k in cls.APPLIED_FIELDS}
 
     @classmethod
-    def extract_updatable_params(cls, params: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_updatable_params(cls, params: dict[str, Any]) -> dict[str, Any]:
         """Extract parameters that can be updated in a stream."""
         return {k: v for k, v in params.items() if k in cls.UPDATABLE_FIELDS}
 
     @classmethod
-    def get_field_info(cls, field_name: str) -> Optional[FieldDef]:
+    def get_field_info(cls, field_name: str) -> FieldDef | None:
         """Get field definition by name."""
         return cls.ALL_FIELDS.get(field_name)
 
@@ -217,7 +244,7 @@ if __name__ == "__main__":
         print(f"Basic field validation failed: {e}")
 
     # Test field-specific validation
-    test_cases: list[tuple[Dict[str, Any], str]] = [
+    test_cases: list[tuple[dict[str, Any], str]] = [
         ({"out": 1, "expand": 1}, "Valid expand value"),
         ({"out": 1, "expand": 5}, "Invalid expand value (should fail)"),
         ({"out": 1, "fmt": "rgb888"}, "Valid format value"),

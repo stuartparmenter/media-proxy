@@ -1,12 +1,12 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
-from dataclasses import dataclass, field
-from typing import Dict, Any, Tuple, Optional
 import logging
+from dataclasses import dataclass, field
+from typing import Any
 
 from ..config import Config
-from ..utils.fields import MediaFields, ProcessingFields, NetworkFields, AllFields
+from ..utils.fields import MediaFields, NetworkFields, ProcessingFields
 from ..utils.hardware import pick_hw_backend
 
 
@@ -15,22 +15,22 @@ class StreamOptions:
     """Strongly typed options for streaming operations."""
 
     # Core parameters (no defaults)
-    output_id: int = field(metadata={'field_def': NetworkFields.OUT})
-    width: int = field(metadata={'field_def': MediaFields.WIDTH})
-    height: int = field(metadata={'field_def': MediaFields.HEIGHT})
-    source: str = field(metadata={'field_def': MediaFields.SOURCE})
-    ddp_port: int = field(metadata={'field_def': NetworkFields.DDP_PORT})
+    output_id: int = field(metadata={"field_def": NetworkFields.OUT})
+    width: int = field(metadata={"field_def": MediaFields.WIDTH})
+    height: int = field(metadata={"field_def": MediaFields.HEIGHT})
+    source: str = field(metadata={"field_def": MediaFields.SOURCE})
+    ddp_port: int = field(metadata={"field_def": NetworkFields.DDP_PORT})
 
     # Media processing options (no defaults)
-    loop: bool = field(metadata={'field_def': MediaFields.LOOP})
-    expand: int = field(metadata={'field_def': MediaFields.EXPAND})
-    hw: str = field(metadata={'field_def': MediaFields.HARDWARE})
-    fit: str = field(metadata={'field_def': MediaFields.FIT})
-    fmt: str = field(metadata={'field_def': MediaFields.FORMAT})
+    loop: bool = field(metadata={"field_def": MediaFields.LOOP})
+    expand: int = field(metadata={"field_def": MediaFields.EXPAND})
+    hw: str = field(metadata={"field_def": MediaFields.HARDWARE})
+    fit: str = field(metadata={"field_def": MediaFields.FIT})
+    fmt: str = field(metadata={"field_def": MediaFields.FORMAT})
 
     # Processing options (no defaults)
-    pace: int = field(metadata={'field_def': ProcessingFields.PACE})
-    ema: float = field(metadata={'field_def': ProcessingFields.EMA})
+    pace: int = field(metadata={"field_def": ProcessingFields.PACE})
+    ema: float = field(metadata={"field_def": ProcessingFields.EMA})
 
     # Caching options (set internally based on config + video size)
     enable_cache: bool = field(init=False, default=False, repr=False)
@@ -45,19 +45,20 @@ class StreamOptions:
     @target_ip.setter
     def target_ip(self, value: str):
         import ipaddress
+
         try:
             ipaddress.ip_address(value)
-        except ValueError:
-            raise ValueError(f"Invalid IP address: {value}")
+        except ValueError as e:
+            raise ValueError(f"Invalid IP address: {value}") from e
         self._target_ip = value
 
     @property
-    def size(self) -> Tuple[int, int]:
+    def size(self) -> tuple[int, int]:
         """Get size as (width, height) tuple."""
         return (self.width, self.height)
 
     @classmethod
-    def from_control_params(cls, params: Dict[str, Any]) -> 'StreamOptions':
+    def from_control_params(cls, params: dict[str, Any]) -> "StreamOptions":
         """Create StreamOptions from control protocol parameters with validation and defaults."""
         config = Config()
 
@@ -99,20 +100,13 @@ class StreamOptions:
         if stream_config_dict["hw"] == "auto":
             resolved_hw_backend = pick_hw_backend("auto")
             stream_config_dict["hw"] = resolved_hw_backend
-            logging.getLogger('streaming').debug(f"Resolved hw=auto to hw={resolved_hw_backend}")
+            logging.getLogger("streaming").debug(f"Resolved hw=auto to hw={resolved_hw_backend}")
 
         return cls(
-            output_id=output_id,
-            width=width,
-            height=height,
-            source=source,
-            ddp_port=ddp_port,
-            **stream_config_dict
+            output_id=output_id, width=width, height=height, source=source, ddp_port=ddp_port, **stream_config_dict
         )
 
-
-
-    def get_applied_params(self) -> Dict[str, Any]:
+    def get_applied_params(self) -> dict[str, Any]:
         """Get parameters that were applied to the stream (for control protocol response)."""
         return {
             "src": self.source,
@@ -122,13 +116,13 @@ class StreamOptions:
             "loop": self.loop,
             "hw": self.hw,
             "fmt": self.fmt,
-            "fit": self.fit
+            "fit": self.fit,
         }
 
     def log_info(self, session_info: str) -> None:
         """Log streaming configuration info."""
         cache_str = f" cache={self.enable_cache}" if self.enable_cache else ""
-        logging.getLogger('streaming').info(
+        logging.getLogger("streaming").info(
             f"start_stream {session_info} out={self.output_id} "
             f"size={self.width}x{self.height} ddp_port={self.ddp_port} src={self.source} "
             f"pace={self.pace} ema={self.ema} expand={self.expand} "

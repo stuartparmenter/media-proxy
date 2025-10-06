@@ -1,45 +1,54 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
+import atexit
+import contextlib
+import hashlib
+import logging
+import tempfile
+import urllib.error
+import urllib.request
+import weakref
+from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from io import BytesIO
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+import aiohttp
 import numpy as np
 from PIL import Image
-from typing import Iterator, Tuple, Dict, List, Optional, Any
-import urllib.request
-import urllib.error
-import aiohttp
-from io import BytesIO
-import tempfile
-import os
-import weakref
-import atexit
-import logging
-from abc import ABC, abstractmethod
-import hashlib
 
 from ..config import Config
-from ..utils.helpers import is_http_url, resolve_local_path
-from urllib.parse import urlparse
-from .protocol import FrameIterator
+from ..utils.helpers import resolve_local_path
 from .processing import resize_pad_to_rgb_bytes
+from .protocol import FrameIterator
+
 
 MIN_DELAY_MS = 10.0  # clamp very small frame delays
 
 # Image size limits
-MAX_SIZE_LIMIT = 50 * 1024 * 1024    # 50MB - reject larger images
-MEMORY_THRESHOLD = 500 * 1024        # 500KB - use BytesIO for smaller images
+MAX_SIZE_LIMIT = 50 * 1024 * 1024  # 50MB - reject larger images
+MEMORY_THRESHOLD = 500 * 1024  # 500KB - use BytesIO for smaller images
+
 
 # Normalized disposal method constants
 class DisposalMethod:
     """Normalized disposal methods for animated images."""
-    NONE = 0        # Do not dispose - leave frame for next to composite over
+
+    NONE = 0  # Do not dispose - leave frame for next to composite over
     BACKGROUND = 1  # Restore to background color before next frame
-    PREVIOUS = 2    # Restore to previous frame state before next frame
+    PREVIOUS = 2  # Restore to previous frame state before next frame
+
 
 # Normalized blend mode constants
 class BlendMode:
     """Normalized blend modes for animated images."""
-    OVER = 0        # Alpha blend over existing pixels (default)
-    SOURCE = 1      # Replace pixels entirely (no alpha blending)
+
+    OVER = 0  # Alpha blend over existing pixels (default)
+    SOURCE = 1  # Replace pixels entirely (no alpha blending)
+
 
 def _format_size_mb(size_bytes: int) -> str:
     """Format size in bytes as MB string."""
@@ -52,7 +61,7 @@ def _get_normalized_disposal_method(pil_img: Image.Image) -> int:
     Returns DisposalMethod constant regardless of format (GIF/APNG/WebP).
     """
     # Try GIF format first (has disposal_method attribute)
-    if hasattr(pil_img, 'disposal_method'):
+    if hasattr(pil_img, "disposal_method"):
         gif_disposal = pil_img.disposal_method  # type: ignore[attr-defined]
         # GIF: 0/1=none, 2=background, 3=previous → normalize to 0,1,2
         if gif_disposal in (0, 1):
@@ -65,8 +74,8 @@ def _get_normalized_disposal_method(pil_img: Image.Image) -> int:
             return DisposalMethod.NONE  # fallback
 
     # Try APNG format (uses info['disposal'])
-    elif 'disposal' in pil_img.info:
-        apng_disposal = pil_img.info['disposal']
+    elif "disposal" in pil_img.info:
+        apng_disposal = pil_img.info["disposal"]
         # APNG: 0=none, 1=background, 2=previous → already normalized
         if apng_disposal == 0:
             return DisposalMethod.NONE
@@ -87,7 +96,7 @@ def _get_normalized_blend_mode(pil_img: Image.Image) -> int:
     Returns BlendMode constant regardless of format.
     """
     # Try APNG format (has blend_op attribute)
-    if hasattr(pil_img, 'blend_op'):
+    if hasattr(pil_img, "blend_op"):
         apng_blend = pil_img.blend_op  # type: ignore[attr-defined]
         # APNG: 0=source, 1=over → reverse to match our constants
         if apng_blend == 0:
@@ -98,6 +107,7 @@ def _get_normalized_blend_mode(pil_img: Image.Image) -> int:
     # Default for GIF, WebP, or unknown formats (always alpha blend)
     return BlendMode.OVER
 
+
 # Global registry for cleanup tracking
 _active_image_sources: weakref.WeakSet[Any] = weakref.WeakSet()
 
@@ -105,19 +115,19 @@ _active_image_sources: weakref.WeakSet[Any] = weakref.WeakSet()
 def _cleanup_all_sources():
     """Emergency cleanup function called on exit."""
     for source in list(_active_image_sources):
-        try:
+        with contextlib.suppress(Exception):  # atexit cleanup - logging/raising would be problematic
             source.cleanup()
-        except Exception:
-            pass
+
 
 # Register emergency cleanup
 atexit.register(_cleanup_all_sources)
+
 
 def cleanup_active_image_sources():
     """Clean up all active image sources. Called when streams are stopped."""
     active_count = len(_active_image_sources)
     if active_count > 0:
-        logging.getLogger('images').info(f"cleaning up {active_count} active image sources")
+        logging.getLogger("images").info(f"cleaning up {active_count} active image sources")
         _cleanup_all_sources()
     return active_count
 
@@ -156,10 +166,8 @@ class BytesIOSource(ImageSource):
         del self._data
         self._cleaned = True
         # Remove from tracking (weakref will handle this automatically too)
-        try:
+        with contextlib.suppress(BaseException):  # Destructor cleanup - must not raise
             _active_image_sources.discard(self)
-        except:
-            pass
 
 
 class TempFileSource(ImageSource):
@@ -181,18 +189,17 @@ class TempFileSource(ImageSource):
             return
 
         try:
-            if os.path.exists(self.temp_path):
-                os.unlink(self.temp_path)
-                logging.getLogger('images').debug(f"cleaned up temp file: {os.path.basename(self.temp_path)}")
+            temp_path_obj = Path(self.temp_path)
+            if temp_path_obj.exists():
+                temp_path_obj.unlink()
+                logging.getLogger("images").debug(f"cleaned up temp file: {temp_path_obj.name}")
         except Exception as e:
-            logging.getLogger('images').warning(f"temp file cleanup warning: {e}")
+            logging.getLogger("images").warning(f"temp file cleanup warning: {e}")
         finally:
             self._cleaned = True
             # Remove from tracking (weakref will handle this automatically too)
-            try:
+            with contextlib.suppress(BaseException):  # Destructor cleanup - must not raise
                 _active_image_sources.discard(self)
-            except:
-                pass
 
 
 class LocalFileSource(ImageSource):
@@ -214,10 +221,8 @@ class LocalFileSource(ImageSource):
             return
         self._cleaned = True
         # Remove from tracking (weakref will handle this automatically too)
-        try:
+        with contextlib.suppress(BaseException):  # Destructor cleanup - must not raise
             _active_image_sources.discard(self)
-        except:
-            pass
 
 
 async def _create_image_source(src_url: str) -> ImageSource:
@@ -227,26 +232,30 @@ async def _create_image_source(src_url: str) -> ImageSource:
         local_path = resolve_local_path(src_url)
         if local_path:
             # Check file size limit
-            file_size = os.path.getsize(local_path)
+            file_size = Path(local_path).stat().st_size
             if file_size > MAX_SIZE_LIMIT:
-                raise ValueError(f"Image too large: {_format_size_mb(file_size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
+                raise ValueError(
+                    f"Image too large: {_format_size_mb(file_size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})"
+                )
 
             return LocalFileSource(local_path)
 
         # For HTTP/HTTPS URLs, fetch with aiohttp (non-blocking)
         async with aiohttp.ClientSession() as session:
-            headers = {'User-Agent': Config().get("net.user_agent")}
+            headers = {"User-Agent": Config().get("net.user_agent")}
             timeout = aiohttp.ClientTimeout(total=30)
 
             async with session.get(src_url, headers=headers, timeout=timeout) as response:
                 response.raise_for_status()
 
                 # Check content length if available
-                content_length = response.headers.get('Content-Length')
+                content_length = response.headers.get("Content-Length")
                 if content_length:
                     size = int(content_length)
                     if size > MAX_SIZE_LIMIT:
-                        raise ValueError(f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})")
+                        raise ValueError(
+                            f"Image too large: {_format_size_mb(size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})"
+                        )
 
                 # Read data asynchronously
                 data = await response.read()
@@ -261,7 +270,7 @@ async def _create_image_source(src_url: str) -> ImageSource:
             return BytesIOSource(data)
 
         # Use temp file for larger downloaded images
-        with tempfile.NamedTemporaryFile(suffix='.img', delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as temp_file:
             temp_file.write(data)
             temp_path = temp_file.name
         return TempFileSource(temp_path)
@@ -280,8 +289,8 @@ def _get_display_name(src_url: str) -> str:
     """Get a display name for a URL for logging."""
     try:
         parsed = urlparse(src_url)
-        path = parsed.path or '/'
-        filename = path.split('/')[-1]
+        path = parsed.path or "/"
+        filename = path.split("/")[-1]
         return filename or parsed.netloc or src_url
     except Exception:
         return src_url[-50:] if len(src_url) > 50 else src_url
@@ -292,8 +301,8 @@ class PilFrameIterator(FrameIterator):
 
     def __init__(self, src_url: str, stream_options):
         super().__init__(src_url, stream_options)
-        self._img_source: Optional[ImageSource] = None
-        self._frame_cache: Dict[str, List[Tuple[bytes, float]]] = {}
+        self._img_source: ImageSource | None = None
+        self._frame_cache: dict[str, list[tuple[bytes, float]]] = {}
         self._cache_memory_usage = 0
         self._cache_stats = {"hits": 0, "misses": 0, "evictions": 0}
         self._first_loop_complete = False
@@ -307,18 +316,19 @@ class PilFrameIterator(FrameIterator):
         """Check if this is an image file we can handle."""
         try:
             from urllib.parse import urlparse
+
             # Parse URL to get path without query parameters
             parsed = urlparse(src_url.lower())
             path = parsed.path if parsed.path else src_url.lower()
 
-            image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')
+            image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
             return any(path.endswith(ext) for ext in image_extensions)
         except Exception:
             return False
 
     def _get_cache_key(self) -> str:
         """Generate cache key based on source URL and stream options."""
-        options_hash = hashlib.md5()
+        options_hash = hashlib.md5()  # noqa: S324  # Not used for security, just cache deduplication
         options_hash.update(self.src_url.encode())
         options_hash.update(str(self.stream_options.__dict__).encode())
         return f"cache_{options_hash.hexdigest()[:16]}"
@@ -336,7 +346,7 @@ class PilFrameIterator(FrameIterator):
         min_frames = config.get("image.frame_cache_min_frames")
         return n_frames >= min_frames
 
-    def _estimate_frame_size(self, size: Tuple[int, int]) -> int:
+    def _estimate_frame_size(self, size: tuple[int, int]) -> int:
         """Estimate memory usage per frame in bytes (RGB format)."""
         width, height = size
         return width * height * 3  # RGB = 3 bytes per pixel
@@ -357,13 +367,12 @@ class PilFrameIterator(FrameIterator):
             del self._frame_cache[cache_key]
             self._cache_memory_usage -= old_size
             self._cache_stats["evictions"] += 1
-            logging.getLogger('images').debug(f"evicted cache entry for {self.src_url} (saved {old_size} bytes)")
+            logging.getLogger("images").debug(f"evicted cache entry for {self.src_url} (saved {old_size} bytes)")
 
-    def __iter__(self) -> Iterator[Tuple[bytes, float]]:
+    def __iter__(self) -> Iterator[tuple[bytes, float]]:
         """Iterate frames - image source must be initialized via async_init() first."""
         assert self._img_source is not None, "Image source not initialized. Call async_init() before iteration."
 
-        config = Config()
         size = self.stream_options.size
         loop_video = self.stream_options.loop
 
@@ -377,8 +386,8 @@ class PilFrameIterator(FrameIterator):
             # Open image once and keep it open for the iteration
             pil_img = img_source.open_image()
             try:
-                is_animated = getattr(pil_img, 'is_animated', False)
-                n_frames = getattr(pil_img, 'n_frames', 1) if is_animated else 1
+                is_animated = getattr(pil_img, "is_animated", False)
+                n_frames = getattr(pil_img, "n_frames", 1) if is_animated else 1
 
                 # Extract palette and background color once for animated images (same for all frames)
                 background_color = None
@@ -386,15 +395,15 @@ class PilFrameIterator(FrameIterator):
                 bg_rgb = (0, 0, 0)  # Default black background for LEDs
 
                 if is_animated:
-                    background_color = pil_img.info.get('background', 0)  # Background color index
-                    if hasattr(pil_img, 'palette') and pil_img.palette:
+                    background_color = pil_img.info.get("background", 0)  # Background color index
+                    if hasattr(pil_img, "palette") and pil_img.palette:
                         try:
                             palette_data = pil_img.palette.getdata()[1]
                             if len(palette_data) >= 3:
                                 palette_rgb = np.frombuffer(palette_data, dtype=np.uint8)  # type: ignore[call-overload]  # numpy stubs limitation with bytes/buffer input
                                 if len(palette_rgb) % 3 == 0:
                                     global_palette = palette_rgb.reshape(-1, 3)
-                        except:
+                        except Exception:  # noqa: S110  # GIF palette parsing fallback
                             pass
 
                     # Determine background color (default to black for LEDs)
@@ -443,7 +452,7 @@ class PilFrameIterator(FrameIterator):
                             pil_img.load()  # REQUIRED: Pillow only extracts WebP duration after load(), not seek()
 
                             # Get timing info from current frame
-                            duration = pil_img.info.get('duration', default_delay_ms)
+                            duration = pil_img.info.get("duration", default_delay_ms)
                             duration = max(MIN_DELAY_MS, float(duration))
 
                             # Get normalized disposal method and blend mode
@@ -452,7 +461,7 @@ class PilFrameIterator(FrameIterator):
 
                             # Initialize canvas on first frame
                             if canvas is None:
-                                canvas = Image.new("RGBA", pil_img.size, bg_rgb + (255,))
+                                canvas = Image.new("RGBA", pil_img.size, (*bg_rgb, 255))
 
                             # Save current canvas state before applying frame (needed for PREVIOUS disposal)
                             if disposal_method == DisposalMethod.PREVIOUS:
@@ -482,7 +491,7 @@ class PilFrameIterator(FrameIterator):
                             # Apply disposal method for next frame
                             if disposal_method == DisposalMethod.BACKGROUND:
                                 # Restore to background color
-                                canvas = Image.new("RGBA", pil_img.size, bg_rgb + (255,))
+                                canvas = Image.new("RGBA", pil_img.size, (*bg_rgb, 255))
                             elif disposal_method == DisposalMethod.PREVIOUS:
                                 # Restore to previous frame state
                                 if previous_canvas is not None:
@@ -498,7 +507,7 @@ class PilFrameIterator(FrameIterator):
                                 self._cache_memory_usage += estimated_size
                                 self._first_loop_complete = True
 
-                                logging.getLogger('images').info(
+                                logging.getLogger("images").info(
                                     f"cached {len(current_loop_frames)} frames for {_get_display_name(self.src_url)} "
                                     f"(~{estimated_size // 1024}KB, total cache: {self._cache_memory_usage // 1024}KB)"
                                 )
@@ -533,8 +542,7 @@ class PilFrameIterator(FrameIterator):
         # Log cache statistics
         stats = self._cache_stats
         if any(stats.values()):
-            logging.getLogger('images').debug(
+            logging.getLogger("images").debug(
                 f"cache stats for {_get_display_name(self.src_url)}: "
                 f"hits={stats['hits']} misses={stats['misses']} evictions={stats['evictions']}"
             )
-

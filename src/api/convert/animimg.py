@@ -1,18 +1,17 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
-import asyncio
 import io
 import logging
 import zipfile
-from typing import Dict, Any, List, Tuple, Optional
-from PIL import Image
-from aiohttp import web
-import yaml
+from typing import Any
 
-from ...config import Config
-from ...streaming.options import StreamOptions
+import yaml
+from aiohttp import web
+from PIL import Image
+
 from ...media.protocol import FrameIteratorFactory
+from ...streaming.options import StreamOptions
 
 
 async def handle_animimg_request(request) -> web.Response:
@@ -25,10 +24,7 @@ async def handle_animimg_request(request) -> web.Response:
         required_params = ["source", "width", "height"]
         for param in required_params:
             if param not in data:
-                return web.json_response(
-                    {"error": f"Missing required parameter: {param}"},
-                    status=400
-                )
+                return web.json_response({"error": f"Missing required parameter: {param}"}, status=400)
 
         # Extract parameters with defaults
         source = data["source"]
@@ -40,26 +36,17 @@ async def handle_animimg_request(request) -> web.Response:
 
         # Create minimal StreamOptions for processing
         # We don't need output_id, ddp_port, etc. for frame extraction
-        stream_options = create_minimal_stream_options(
-            source=source,
-            width=width,
-            height=height,
-            fit=fit
-        )
+        stream_options = create_minimal_stream_options(source=source, width=width, height=height, fit=fit)
 
-        logging.getLogger('animimg').info(
-            f"Processing animimg request: {source} -> {width}x{height}, "
-            f"frame_limit={frame_limit}, fit={fit}"
+        logging.getLogger("animimg").info(
+            f"Processing animimg request: {source} -> {width}x{height}, frame_limit={frame_limit}, fit={fit}"
         )
 
         # Extract frames using existing pipeline
         frames = await extract_frames(stream_options, frame_limit, fps_limit)
 
         if not frames:
-            return web.json_response(
-                {"error": "No frames could be extracted from source"},
-                status=400
-            )
+            return web.json_response({"error": "No frames could be extracted from source"}, status=400)
 
         # Create ZIP file with frames and YAML config
         zip_data = create_animimg_zip(frames, width, height)
@@ -68,25 +55,18 @@ async def handle_animimg_request(request) -> web.Response:
         return web.Response(
             body=zip_data,
             content_type="application/zip",
-            headers={
-                "Content-Disposition": "attachment; filename=animimg_frames.zip"
-            }
+            headers={"Content-Disposition": "attachment; filename=animimg_frames.zip"},
         )
 
     except ValueError as e:
         return web.json_response({"error": f"Invalid parameter: {e}"}, status=400)
     except Exception as e:
-        logging.getLogger('animimg').error(f"Error processing animimg request: {e}", exc_info=True)
-        return web.json_response(
-            {"error": f"Processing failed: {e}"},
-            status=500
-        )
+        logging.getLogger("animimg").error(f"Error processing animimg request: {e}", exc_info=True)
+        return web.json_response({"error": f"Processing failed: {e}"}, status=500)
 
 
 def create_minimal_stream_options(source: str, width: int, height: int, fit: str) -> StreamOptions:
     """Create minimal StreamOptions for frame extraction (no streaming needed)."""
-    config = Config()
-
     # Create fake control params to use existing from_control_params method
     fake_params = {
         "out": 0,  # Not used for frame extraction
@@ -101,7 +81,9 @@ def create_minimal_stream_options(source: str, width: int, height: int, fit: str
     return StreamOptions.from_control_params(fake_params)
 
 
-async def extract_frames(stream_options: StreamOptions, frame_limit: int, fps_limit: Optional[float] = None) -> List[Tuple[bytes, float]]:
+async def extract_frames(
+    stream_options: StreamOptions, frame_limit: int, fps_limit: float | None = None
+) -> list[tuple[bytes, float]]:
     """Extract frames using existing media processing pipeline."""
     frames = []
 
@@ -130,53 +112,55 @@ async def extract_frames(stream_options: StreamOptions, frame_limit: int, fps_li
         # Clean up iterator
         iterator.cleanup()
 
-        logging.getLogger('animimg').info(f"Extracted {len(frames)} frames")
+        logging.getLogger("animimg").info(f"Extracted {len(frames)} frames")
         return frames
 
     except Exception as e:
-        logging.getLogger('animimg').error(f"Frame extraction failed: {e}")
+        logging.getLogger("animimg").error(f"Frame extraction failed: {e}")
         raise
 
 
-def create_animimg_zip(frames: List[Tuple[bytes, float]], width: int, height: int) -> bytes:
+def create_animimg_zip(frames: list[tuple[bytes, float]], width: int, height: int) -> bytes:
     """Create ZIP file containing PNG frames and ESPHome YAML config."""
     zip_buffer = io.BytesIO()
 
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         frame_files = []
 
         # Convert frames to PNG and add to ZIP
         for i, (rgb888_bytes, delay_ms) in enumerate(frames):
             # Convert RGB888 bytes to PIL Image
-            img = Image.frombuffer('RGB', (width, height), rgb888_bytes, 'raw', 'RGB', 0, 1)
+            img = Image.frombuffer("RGB", (width, height), rgb888_bytes, "raw", "RGB", 0, 1)
 
             # Save as PNG in memory
             img_buffer = io.BytesIO()
-            img.save(img_buffer, format='PNG')
+            img.save(img_buffer, format="PNG")
             img_data = img_buffer.getvalue()
 
             # Add to ZIP with sequential filename
-            filename = f"frame_{i+1:03d}.png"
+            filename = f"frame_{i + 1:03d}.png"
             zip_file.writestr(filename, img_data)
 
             # Track for YAML config
-            frame_files.append({
-                'file': filename,
-                'delay_ms': delay_ms  # Keep as float for precision
-            })
+            frame_files.append(
+                {
+                    "file": filename,
+                    "delay_ms": delay_ms,  # Keep as float for precision
+                }
+            )
 
         # Create ESPHome YAML configuration
         yaml_config = create_esphome_yaml_config(frame_files)
-        zip_file.writestr('animimg_config.yaml', yaml_config)
+        zip_file.writestr("animimg_config.yaml", yaml_config)
 
         # Add README with usage instructions
         readme = create_readme(len(frames), width, height)
-        zip_file.writestr('README.txt', readme)
+        zip_file.writestr("README.txt", readme)
 
     return zip_buffer.getvalue()
 
 
-def create_esphome_yaml_config(frame_files: List[Dict[str, Any]]) -> str:
+def create_esphome_yaml_config(frame_files: list[dict[str, Any]]) -> str:
     """Create ESPHome YAML configuration for animimg widget."""
 
     # Create proper ESPHome image configuration
@@ -184,39 +168,35 @@ def create_esphome_yaml_config(frame_files: List[Dict[str, Any]]) -> str:
     frame_ids = []
     for i, frame_info in enumerate(frame_files):
         # Generate valid ESPHome ID (no dots, underscores only)
-        frame_id = f"frame_{i+1:03d}"
+        frame_id = f"frame_{i + 1:03d}"
         frame_ids.append(frame_id)
 
-        image_configs.append({
-            'file': f"images/{frame_info['file']}",
-            'id': frame_id,
-            'type': 'RGB565'
-        })
+        image_configs.append({"file": f"images/{frame_info['file']}", "id": frame_id, "type": "RGB565"})
 
     # Calculate total animation duration in ms
-    total_duration_ms = sum(frame_info['delay_ms'] for frame_info in frame_files)
+    total_duration_ms = sum(frame_info["delay_ms"] for frame_info in frame_files)
     total_duration_ms = round(total_duration_ms) if frame_files else 100
 
     # Create ESPHome configuration
     config = {
-        'image': image_configs,
-        'lvgl': {
-            'pages': [
+        "image": image_configs,
+        "lvgl": {
+            "pages": [
                 {
-                    'id': 'animation_page',
-                    'widgets': [
+                    "id": "animation_page",
+                    "widgets": [
                         {
-                            'animimg': {
-                                'id': 'my_animation',
-                                'src': frame_ids,
-                                'duration': f"{total_duration_ms}ms",
-                                'repeat_count': 'forever'
+                            "animimg": {
+                                "id": "my_animation",
+                                "src": frame_ids,
+                                "duration": f"{total_duration_ms}ms",
+                                "repeat_count": "forever",
                             }
                         }
-                    ]
+                    ],
                 }
             ]
-        }
+        },
     }
 
     # Add header comment

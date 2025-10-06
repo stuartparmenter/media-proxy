@@ -3,23 +3,26 @@
 
 import contextlib
 import logging
-import numpy as np
-import os
-from typing import Iterator, Tuple, Dict, Optional, Any, List
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
 import av
+import numpy as np
 from av.codec.hwaccel import HWAccel
-from av.error import FFmpegError, HTTPError, HTTPClientError, HTTPServerError
+from av.error import FFmpegError, HTTPClientError, HTTPError, HTTPServerError
 from av.filter import Graph as AvFilterGraph
 from av.video.frame import VideoFrame
 
 from ..config import Config
-from .protocol import FrameIterator
 from ..utils.helpers import resolve_local_path
+from .protocol import FrameIterator
+
 
 MIN_DELAY_MS = 10.0
 
 
-def open_stream(src_url: str, hw_backend: Optional[str], options: Optional[Dict[str, str]] = None):
+def open_stream(src_url: str, hw_backend: str | None, options: dict[str, str] | None = None):
     """Open media container with resolved hardware acceleration backend."""
     options = options or {}
 
@@ -28,7 +31,7 @@ def open_stream(src_url: str, hw_backend: Optional[str], options: Optional[Dict[
     pyav_url = local_path if local_path else src_url
 
     # For local files, check existence first to avoid misleading hwaccel errors
-    if local_path and not os.path.exists(local_path):
+    if local_path and not Path(local_path).exists():
         raise FileNotFoundError(f"cannot open media file: {src_url}")
 
     try:
@@ -49,24 +52,20 @@ def open_stream(src_url: str, hw_backend: Optional[str], options: Optional[Dict[
 
 def rotation_from_stream_and_frame(vstream, frame) -> int:
     """Extract rotation metadata from stream or frame."""
-    try:
-        rot = getattr(frame, "rotation", None)
-        if isinstance(rot, int):
-            return ((rot % 360) + 360) % 360
-    except Exception:
-        pass
-    try:
-        md = getattr(vstream, "metadata", {})
-        if md:
-            r = md.get("rotate")
-            if r is not None:
-                return ((int(str(r)) % 360) + 360) % 360
-    except Exception:
-        pass
+    rot = getattr(frame, "rotation", None)
+    if isinstance(rot, int):
+        return ((rot % 360) + 360) % 360
+
+    md = getattr(vstream, "metadata", {})
+    if md:
+        r = md.get("rotate")
+        if r is not None:
+            return ((int(str(r)) % 360) + 360) % 360
+
     return 0
 
 
-def tb_num_den(tb) -> Tuple[int, int]:
+def tb_num_den(tb) -> tuple[int, int]:
     """Extract numerator/denominator from time base."""
     if tb is None:
         return (1, 1000)
@@ -82,73 +81,68 @@ def tb_num_den(tb) -> Tuple[int, int]:
         return (1, 1000)
 
 
-def sar_of(obj, vstream) -> Tuple[int, int]:
+def sar_of(obj, vstream) -> tuple[int, int]:
     """Extract sample aspect ratio from frame or stream."""
     # Try frame SAR first; fall back to codec_context SAR; else 1:1
-    try:
-        sar = getattr(obj, "sample_aspect_ratio", None)
-        n = getattr(sar, "num", getattr(sar, "numerator", None))
-        d = getattr(sar, "den", getattr(sar, "denominator", None))
-        if n and d and n > 0 and d > 0:
-            return int(n), int(d)
-    except Exception:
-        pass
-    try:
-        cc = getattr(vstream, "codec_context", None)
-        sar = getattr(cc, "sample_aspect_ratio", None)
-        n = getattr(sar, "num", getattr(sar, "numerator", None))
-        d = getattr(sar, "den", getattr(sar, "denominator", None))
-        if n and d and n > 0 and d > 0:
-            return int(n), int(d)
-    except Exception:
-        pass
+    sar = getattr(obj, "sample_aspect_ratio", None)
+    n = getattr(sar, "num", getattr(sar, "numerator", None))
+    d = getattr(sar, "den", getattr(sar, "denominator", None))
+    if n and d and n > 0 and d > 0:
+        return int(n), int(d)
+
+    cc = getattr(vstream, "codec_context", None)
+    sar = getattr(cc, "sample_aspect_ratio", None)
+    n = getattr(sar, "num", getattr(sar, "numerator", None))
+    d = getattr(sar, "den", getattr(sar, "denominator", None))
+    if n and d and n > 0 and d > 0:
+        return int(n), int(d)
+
     return (1, 1)
 
 
-def estimate_black_bars(frame_w: int, frame_h: int, gray: np.ndarray,
-                       thresh: int, min_px: int, max_ratio: float) -> Dict[str, int]:
+def estimate_black_bars(
+    frame_w: int, frame_h: int, gray: np.ndarray, thresh: int, min_px: int, max_ratio: float
+) -> dict[str, int]:
     """Return {'l','r','t','b'} estimated black bar widths in pixels for one frame."""
     h, w = gray.shape  # (H, W)
-    
+
     def walk_left():
         cap = int(w * max_ratio)
         x = 0
         while x < min(cap, w - 1):
-            if int(np.median(gray[:, x:min(x+4, w)])) > thresh: 
+            if int(np.median(gray[:, x : min(x + 4, w)])) > thresh:
                 break
             x += 1
         return max(min_px if x >= min_px else 0, min(x, cap))
-    
+
     def walk_right():
         cap = int(w * max_ratio)
         x = 0
         while x < min(cap, w - 1):
-            if int(np.median(gray[:, max(0, w-1-(x+3)):w-x])) > thresh: 
+            if int(np.median(gray[:, max(0, w - 1 - (x + 3)) : w - x])) > thresh:
                 break
             x += 1
         return max(min_px if x >= min_px else 0, min(x, cap))
-    
+
     def walk_top():
         cap = int(h * max_ratio)
         y = 0
         while y < min(cap, h - 1):
-            if int(np.median(gray[y:min(y+4, h), :])) > thresh: 
+            if int(np.median(gray[y : min(y + 4, h), :])) > thresh:
                 break
             y += 1
         return max(min_px if y >= min_px else 0, min(y, cap))
-    
+
     def walk_bot():
         cap = int(h * max_ratio)
         y = 0
         while y < min(cap, h - 1):
-            if int(np.median(gray[max(0, h-1-(y+3)):h-y, :])) > thresh: 
+            if int(np.median(gray[max(0, h - 1 - (y + 3)) : h - y, :])) > thresh:
                 break
             y += 1
         return max(min_px if y >= min_px else 0, min(y, cap))
-    
+
     return {"l": walk_left(), "r": walk_right(), "t": walk_top(), "b": walk_bot()}
-
-
 
 
 class PyAvFrameIterator(FrameIterator):
@@ -157,13 +151,14 @@ class PyAvFrameIterator(FrameIterator):
     def __init__(self, src_url: str, stream_options):
         super().__init__(src_url, stream_options)
         self.real_src_url = src_url  # May be updated for YouTube URLs
-        self.http_opts: Dict[str, Any] = {}  # May be updated for YouTube URLs
+        self.http_opts: dict[str, Any] = {}  # May be updated for YouTube URLs
         self._container = None  # Will be set by async_init if called
         self._vstream = None
 
     async def async_init(self):
         """Async initialization to open stream without blocking event loop."""
         import asyncio
+
         loop = asyncio.get_event_loop()
 
         # Determine URL to open
@@ -173,11 +168,7 @@ class PyAvFrameIterator(FrameIterator):
 
         # Run av.open in thread executor to avoid blocking
         self._container, self._vstream = await loop.run_in_executor(
-            None,
-            open_stream,
-            pyav_url,
-            self.stream_options.hw,
-            self.http_opts
+            None, open_stream, pyav_url, self.stream_options.hw, self.http_opts
         )
 
     @classmethod
@@ -185,52 +176,52 @@ class PyAvFrameIterator(FrameIterator):
         """Check if this is a video file or stream we can handle."""
         try:
             from urllib.parse import urlparse
+
             # Parse URL to get path without query parameters
             parsed = urlparse(src_url.lower())
             path = parsed.path if parsed.path else src_url.lower()
             lower_url = src_url.lower()
 
             # First, check if this looks like an image that PIL should handle
-            image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp')
+            image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
             if any(path.endswith(ext) for ext in image_extensions):
                 return False  # Let PIL handle these
 
             # Video file extensions
-            video_extensions = ('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp')
+            video_extensions = (".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".3gp")
             if any(path.endswith(ext) for ext in video_extensions):
                 return True
 
             # Streaming protocols (but be careful with HTTP images)
-            streaming_prefixes = ('rtmp://', 'rtsp://', 'udp://', 'tcp://')
+            streaming_prefixes = ("rtmp://", "rtsp://", "udp://", "tcp://")
             if any(lower_url.startswith(prefix) for prefix in streaming_prefixes):
                 return True
 
             # HTTP/HTTPS URLs - accept these as potential video streams
             # (but PIL will get first chance at obvious image URLs)
-            if lower_url.startswith(('http://', 'https://')):
+            if lower_url.startswith(("http://", "https://")):
                 return True
 
             # Local file without clear extension - let PyAV try to handle it as video
             # (but only if it's not an obvious image extension)
-            if not lower_url.startswith(('http://', 'https://')):
-                return True
-
-            return False
+            return bool(not lower_url.startswith(("http://", "https://")))
         except Exception:
             return False
 
-    def __iter__(self) -> Iterator[Tuple[bytes, float]]:
+    def __iter__(self) -> Iterator[tuple[bytes, float]]:
         """Iterate frames from video sources using PyAV filter graph."""
         from ..utils.helpers import is_youtube_url
 
         if is_youtube_url(self.src_url) and self.real_src_url == self.src_url:
             # If real_src_url wasn't updated, resolution may have failed
             # Try to proceed with original URL - if it fails, we'll get HTTP errors
-            logging.getLogger('video').warning(f"YouTube URL resolution may have failed, trying original URL: {self.src_url}")
+            logging.getLogger("video").warning(
+                f"YouTube URL resolution may have failed, trying original URL: {self.src_url}"
+            )
 
         # Implement the PyAV iteration directly in the protocol class
         config = Config()
-        TW, TH = self.stream_options.size
+        target_width, target_height = self.stream_options.size
 
         # Auto-crop (black bar) config/state
         ac_cfg = config.get("video.autocrop")
@@ -239,15 +230,17 @@ class PyAvFrameIterator(FrameIterator):
         ac_thresh = int(ac_cfg.get("luma_thresh"))
         ac_max_ratio = float(ac_cfg.get("max_bar_ratio"))
         ac_min_px = int(ac_cfg.get("min_bar_px"))
-        ac_samples: Dict[str, List[int]] = {"l": [], "r": [], "t": [], "b": []}
+        ac_samples: dict[str, list[int]] = {"l": [], "r": [], "t": [], "b": []}
         ac_decided = False
         ac_crop = {"l": 0, "r": 0, "t": 0, "b": 0}  # in source pixel coords
         ac_seen = 0
 
         try:
-            from av.error import BlockingIOError as AvBlockingIOError  # type: ignore[import]  # PyAV stubs may not include this
+            from av.error import (
+                BlockingIOError as AvBlockingIOError,  # type: ignore[import]  # PyAV stubs may not include this
+            )
         except Exception:
-            AvBlockingIOError = None  # type: ignore[misc,assignment]  # Fallback when PyAV doesn't have BlockingIOError
+            AvBlockingIOError = None  # type: ignore[misc,assignment]  # noqa: N806  # Fallback when PyAV doesn't have BlockingIOError
 
         first_graph_log_done = False
         frames_decoded = 0  # Initialize outside try block for error logging
@@ -260,36 +253,33 @@ class PyAvFrameIterator(FrameIterator):
 
             # Enable FFmpeg cache protocol if requested
             if self.stream_options.enable_cache:
-                logging.getLogger('video').info(f"Using FFmpeg cache: protocol")
+                logging.getLogger("video").info("Using FFmpeg cache: protocol")
                 pyav_url = f"cache:{pyav_url}"
 
             # Log HTTP options if present (debug only, don't log auth tokens)
-            if self.http_opts and logging.getLogger('video').isEnabledFor(logging.DEBUG):
-                debug_opts = {k: (f"{len(v)} chars" if k == 'headers' else v)
-                              for k, v in self.http_opts.items()}
-                logging.getLogger('video').debug(f"HTTP options: {debug_opts}")
+            if self.http_opts and logging.getLogger("video").isEnabledFor(logging.DEBUG):
+                debug_opts = {k: (f"{len(v)} chars" if k == "headers" else v) for k, v in self.http_opts.items()}
+                logging.getLogger("video").debug(f"HTTP options: {debug_opts}")
 
             # Use pre-opened container from async_init
-            assert self._container is not None and self._vstream is not None, \
+            assert self._container is not None and self._vstream is not None, (
                 "Container not initialized. Must call async_init() before iteration."
+            )
 
             container = self._container
             vstream = self._vstream
 
             # Default frame delay if timestamps are missing
-            avg_ms: Optional[float] = None
+            avg_ms: float | None = None
             if vstream.average_rate:
-                try:
-                    fps = float(vstream.average_rate)
-                    if fps > 0:
-                        avg_ms = max(MIN_DELAY_MS, 1000.0 / fps)
-                except Exception:
-                    pass
+                fps = float(vstream.average_rate)
+                if fps > 0:
+                    avg_ms = max(MIN_DELAY_MS, 1000.0 / fps)
 
             # Rebuildable filter graph state
             graph = None
             src_in = sink_out = None
-            g_props: Dict[str, Any] = {"w": None, "h": None, "fmt": None, "sar": (1, 1), "rot": 0}
+            g_props: dict[str, Any] = {"w": None, "h": None, "fmt": None, "sar": (1, 1), "rot": 0}
 
             def ensure_graph_for(frame) -> None:
                 """(Re)build the filter graph if geometry/SAR/format/rotation changed."""
@@ -305,28 +295,29 @@ class PyAvFrameIterator(FrameIterator):
                 want_ac = bool(ac_enabled and ac_decided and any(v > 0 for v in ac_crop.values()))
 
                 need_rebuild = (
-                    graph is None or
-                    g_props["w"] != w or
-                    g_props["h"] != h or
-                    g_props["fmt"] != fmt_name or
-                    g_props["sar"] != (sar_n, sar_d) or
-                    g_props["rot"] != rot or
-                    (want_ac and not applied_ac)
+                    graph is None
+                    or g_props["w"] != w
+                    or g_props["h"] != h
+                    or g_props["fmt"] != fmt_name
+                    or g_props["sar"] != (sar_n, sar_d)
+                    or g_props["rot"] != rot
+                    or (want_ac and not applied_ac)
                 )
                 if not need_rebuild:
                     return
 
                 old = g_props.copy()
-                g_props.update({"w": w, "h": h, "fmt": fmt_name, "sar": (sar_n, sar_d), "rot": rot, "ac_applied": want_ac})
-                logging.getLogger('video').debug(f"rebuild: {old} -> {g_props} (ac={ac_crop if (ac_enabled and ac_decided) else 'pending'})")
+                g_props.update(
+                    {"w": w, "h": h, "fmt": fmt_name, "sar": (sar_n, sar_d), "rot": rot, "ac_applied": want_ac}
+                )
+                logging.getLogger("video").debug(
+                    f"rebuild: {old} -> {g_props} (ac={ac_crop if (ac_enabled and ac_decided) else 'pending'})"
+                )
 
                 if not first_graph_log_done:
-                    try:
-                        cc = getattr(vstream, "codec_context", None)
-                        in_sar = getattr(cc, "sample_aspect_ratio", None)
-                        logging.getLogger('video').info(f"input codec SAR={in_sar} size={w}x{h}")
-                    except Exception:
-                        pass
+                    cc = getattr(vstream, "codec_context", None)
+                    in_sar = getattr(cc, "sample_aspect_ratio", None)
+                    logging.getLogger("video").info(f"input codec SAR={in_sar} size={w}x{h}")
                     first_graph_log_done = True
 
                 g = AvFilterGraph()
@@ -349,10 +340,10 @@ class PyAvFrameIterator(FrameIterator):
 
                 # (A) autocrop baked bars in source pixel coords, if decided
                 if want_ac:
-                    L, R, T, B = ac_crop["l"], ac_crop["r"], ac_crop["t"], ac_crop["b"]
-                    cw = max(1, w - (L + R))
-                    ch = max(1, h - (T + B))
-                    n = g.add("crop", args=f"{cw}:{ch}:{L}:{T}")
+                    left, right, top, bottom = ac_crop["l"], ac_crop["r"], ac_crop["t"], ac_crop["b"]
+                    cw = max(1, w - (left + right))
+                    ch = max(1, h - (top + bottom))
+                    n = g.add("crop", args=f"{cw}:{ch}:{left}:{top}")
                     last.link_to(n)
                     last = n
 
@@ -391,35 +382,49 @@ class PyAvFrameIterator(FrameIterator):
                 # Fit selection
                 fit_mode = self.stream_options.fit
                 if fit_mode == "cover":
-                    n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear:force_original_aspect_ratio=increase" + expand_args)
+                    n = g.add(
+                        "scale",
+                        args=f"{target_width}:{target_height}:flags=bilinear:force_original_aspect_ratio=increase"
+                        + expand_args,
+                    )
                     last.link_to(n)
                     last = n
-                    n = g.add("crop", args=f"{TW}:{TH}:(in_w-{TW})/2:(in_h-{TH})/2")
+                    n = g.add(
+                        "crop", args=f"{target_width}:{target_height}:(in_w-{target_width})/2:(in_h-{target_height})/2"
+                    )
                     last.link_to(n)
                     last = n
                 elif fit_mode == "auto":
                     # Smart fit: check if aspect ratios match
                     src_ratio = (w * sar_n) / (h * sar_d) if sar_d != 0 else w / h
-                    target_ratio = TW / TH
+                    target_ratio = target_width / target_height
 
                     if abs(src_ratio - target_ratio) < 0.01:  # Aspect ratios match
                         # Just scale directly - no padding or cropping needed
-                        n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear" + expand_args)
+                        n = g.add("scale", args=f"{target_width}:{target_height}:flags=bilinear" + expand_args)
                         last.link_to(n)
                         last = n
                     else:
                         # Fall back to pad behavior for mismatched ratios
-                        n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear:force_original_aspect_ratio=decrease" + expand_args)
+                        n = g.add(
+                            "scale",
+                            args=f"{target_width}:{target_height}:flags=bilinear:force_original_aspect_ratio=decrease"
+                            + expand_args,
+                        )
                         last.link_to(n)
                         last = n
-                        n = g.add("pad", args=f"{TW}:{TH}:(ow-iw)/2:(oh-ih)/2:color=black")
+                        n = g.add("pad", args=f"{target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color=black")
                         last.link_to(n)
                         last = n
                 else:  # "pad" mode
-                    n = g.add("scale", args=f"{TW}:{TH}:flags=bilinear:force_original_aspect_ratio=decrease" + expand_args)
+                    n = g.add(
+                        "scale",
+                        args=f"{target_width}:{target_height}:flags=bilinear:force_original_aspect_ratio=decrease"
+                        + expand_args,
+                    )
                     last.link_to(n)
                     last = n
-                    n = g.add("pad", args=f"{TW}:{TH}:(ow-iw)/2:(oh-ih)/2:color=black")
+                    n = g.add("pad", args=f"{target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color=black")
                     last.link_to(n)
                     last = n
 
@@ -449,16 +454,16 @@ class PyAvFrameIterator(FrameIterator):
                 # Seek to beginning for 2nd+ loops when cache is enabled
                 if loop_count > 1 and self.stream_options.enable_cache:
                     try:
-                        logging.getLogger('video').debug(f"Seeking to start for loop {loop_count} (cache enabled)")
+                        logging.getLogger("video").debug(f"Seeking to start for loop {loop_count} (cache enabled)")
                         container.seek(0)
                     except Exception as e:
-                        logging.getLogger('video').warning(f"Failed to seek to start: {e}, will continue without seek")
+                        logging.getLogger("video").warning(f"Failed to seek to start: {e}, will continue without seek")
 
                 # Reset per-loop state
-                last_pts_s: Optional[float] = None
+                last_pts_s: float | None = None
 
                 for packet in container.demux(vstream):
-                    # decode() may return 0..N frames (depending on codec & B-frames)
+                    # decode() may return 0..N frames (depending on codec & bottom-frames)
                     frames = packet.decode()
                     for frame in frames:
                         # PyAV packet.decode() stub is incomplete - returns VideoFrame for video streams
@@ -469,8 +474,9 @@ class PyAvFrameIterator(FrameIterator):
                         if ac_enabled and not ac_decided and ac_seen < ac_probe_frames:
                             try:
                                 gray = frame.to_ndarray(format="gray")
-                                cand = estimate_black_bars(frame.width, frame.height, gray,
-                                                         ac_thresh, ac_min_px, ac_max_ratio)
+                                cand = estimate_black_bars(
+                                    frame.width, frame.height, gray, ac_thresh, ac_min_px, ac_max_ratio
+                                )
                                 # Adjust for rotation metadata
                                 r = rotation_from_stream_and_frame(vstream, frame)
                                 if r == 90:
@@ -481,12 +487,13 @@ class PyAvFrameIterator(FrameIterator):
                                     cand = {"l": cand["r"], "r": cand["l"], "t": cand["b"], "b": cand["t"]}
                                 for k in ("l", "r", "t", "b"):
                                     ac_samples[k].append(int(cand[k]))
-                            except Exception:
+                            except Exception:  # noqa: S110  # Skip invalid autocrop samples
                                 pass
                             finally:
                                 ac_seen += 1
                                 if ac_seen >= ac_probe_frames:
                                     import statistics as _st
+
                                     ac_crop = {k: int(_st.median(v) if v else 0) for k, v in ac_samples.items()}
                                     ac_decided = True
                                     # Force a rebuild next frame to apply crop
@@ -505,10 +512,12 @@ class PyAvFrameIterator(FrameIterator):
                                 out_frames.append(of)
                             except Exception as pe:
                                 # Check for PyAV blocking IO errors
-                                if (AvBlockingIOError is not None and isinstance(pe, AvBlockingIOError)) \
-                                   or getattr(pe, "errno", None) in (11, 35) \
-                                   or "resource temporarily unavailable" in str(pe).lower() \
-                                   or "eagain" in str(pe).lower():
+                                if (
+                                    (AvBlockingIOError is not None and isinstance(pe, AvBlockingIOError))
+                                    or getattr(pe, "errno", None) in (11, 35)
+                                    or "resource temporarily unavailable" in str(pe).lower()
+                                    or "eagain" in str(pe).lower()
+                                ):
                                     break
                                 raise
 
@@ -547,7 +556,7 @@ class PyAvFrameIterator(FrameIterator):
                     # Not looping - exit after first iteration
                     break
 
-        except (HTTPError, HTTPClientError, HTTPServerError) as e:
+        except (HTTPError, HTTPClientError, HTTPServerError):
             # HTTP errors - re-raise for upstream handling (streaming layer will decide if retry needed)
             raise
         except FileNotFoundError as e:
@@ -560,27 +569,27 @@ class PyAvFrameIterator(FrameIterator):
                 raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
 
             # Enhanced error logging for I/O errors and other failures
-            errno_val = getattr(e, 'errno', None)
+            errno_val = getattr(e, "errno", None)
 
             # Get codec information if available
             try:
-                if vstream and hasattr(vstream, 'codec_context'):
-                    codec_name = getattr(vstream.codec_context, 'name', 'unknown')
+                if vstream and hasattr(vstream, "codec_context"):
+                    codec_name = getattr(vstream.codec_context, "name", "unknown")
                 else:
-                    codec_name = 'unknown'
-            except:
-                codec_name = 'unknown'
+                    codec_name = "unknown"
+            except Exception:
+                codec_name = "unknown"
 
             # Special handling for I/O errors (errno 5)
-            if errno_val == 5 or 'i/o error' in msg:
-                logging.getLogger('video').error(
+            if errno_val == 5 or "i/o error" in msg:
+                logging.getLogger("video").error(
                     f"I/O error during decode: errno={errno_val} codec={codec_name} "
                     f"hw={self.stream_options.hw} frames_decoded={frames_decoded} "
                     f"http_opts={list(self.http_opts.keys()) if self.http_opts else 'none'}"
                 )
             else:
                 # Log other errors with diagnostic context
-                logging.getLogger('video').error(
+                logging.getLogger("video").error(
                     f"Decode error: {type(e).__name__} errno={errno_val} codec={codec_name} "
                     f"hw={self.stream_options.hw} frames_decoded={frames_decoded}"
                 )
@@ -590,10 +599,8 @@ class PyAvFrameIterator(FrameIterator):
         finally:
             # Always close container, even on errors
             if container:
-                try:
+                with contextlib.suppress(Exception):
                     container.close()
-                except Exception:
-                    pass  # Ignore cleanup errors
 
     def cleanup(self) -> None:
         """Clean up any resources used by the iterator."""

@@ -1,13 +1,14 @@
 # © Copyright 2025 Stuart Parmenter
 # SPDX-License-Identifier: MIT
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union, Tuple, Callable
-from dataclasses import dataclass
-from contextlib import asynccontextmanager
 import asyncio
+import contextlib
 import logging
 import time
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from ..streaming.options import StreamOptions
 
@@ -15,10 +16,11 @@ from ..streaming.options import StreamOptions
 @dataclass
 class FrameMetadata:
     """Metadata associated with a frame."""
+
     sequence: int
     timestamp_ms: float
     delay_ms: float
-    size: Tuple[int, int]  # (width, height)
+    size: tuple[int, int]  # (width, height)
     format: str  # "rgb888", "rgb565le", etc.
     is_still: bool = False
     is_last_frame: bool = False
@@ -27,15 +29,17 @@ class FrameMetadata:
 @dataclass
 class OutputTarget:
     """Represents an output destination."""
+
     host: str
     port: int
     output_id: int
     protocol: str  # "ddp", "mjpeg", "h264", etc.
-    
+
 
 @dataclass
 class OutputMetrics:
     """Performance metrics for an output stream."""
+
     frames_sent: int = 0
     packets_sent: int = 0
     bytes_sent: int = 0
@@ -45,7 +49,7 @@ class OutputMetrics:
     avg_queue_size: float = 0.0
     max_queue_size: int = 0
     last_update: float = 0.0
-    
+
     def reset(self):
         self.frames_sent = 0
         self.packets_sent = 0
@@ -79,11 +83,13 @@ class OutputProtocol(ABC):
         pass
 
     # Stream management interface (optional for protocols that need conflict resolution)
-    def get_stream_key(self, session, params: Dict[str, Any]) -> Any:
+    def get_stream_key(self, session, params: dict[str, Any]) -> Any:
         """Generate stream key for conflict detection. Return None if no conflicts possible."""
         return None  # Default: no conflicts
 
-    async def create_and_register_stream(self, stream_key: Any, task_factory: Callable[[], 'asyncio.Task']) -> 'asyncio.Task':
+    async def create_and_register_stream(
+        self, stream_key: Any, task_factory: Callable[[], "asyncio.Task"]
+    ) -> "asyncio.Task":
         """Atomically ensure exclusive access, create task, and register stream.
 
         Args:
@@ -97,20 +103,20 @@ class OutputProtocol(ABC):
         """
         return task_factory()
 
-    async def cleanup_stream(self, stream_key: Any, task: 'asyncio.Task') -> None:
+    async def cleanup_stream(self, stream_key: Any, task: "asyncio.Task") -> None:
         """Clean up stream registration. Default: no-op."""
-        pass
-        
-        
+        # Default implementation does nothing - subclasses can override
+        return
+
     @property
     def is_running(self) -> bool:
         """Check if the output protocol is currently running."""
         return self._running
-        
+
     def get_metrics(self) -> OutputMetrics:
         """Get current performance metrics."""
         return self.metrics
-        
+
     def reset_metrics(self) -> None:
         """Reset performance metrics."""
         self.metrics.reset()
@@ -118,17 +124,17 @@ class OutputProtocol(ABC):
 
 class BufferedOutputProtocol(OutputProtocol):
     """Base class for output protocols that use internal buffering/queuing."""
-    
+
     def __init__(self, target: OutputTarget, stream_options: StreamOptions):
         super().__init__(target, stream_options)
-        self._queue: asyncio.Queue[Tuple[bytes, FrameMetadata]] = asyncio.Queue(maxsize=4096)
-        self._worker_task: Optional[asyncio.Task] = None
+        self._queue: asyncio.Queue[tuple[bytes, FrameMetadata]] = asyncio.Queue(maxsize=4096)
+        self._worker_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start the buffered output with worker task."""
         await super().start()
         self._worker_task = asyncio.create_task(self._worker_loop())
-        
+
     async def stop(self) -> None:
         """Stop the buffered output and clean up."""
         await super().stop()
@@ -140,13 +146,11 @@ class BufferedOutputProtocol(OutputProtocol):
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                logging.getLogger('output').error(f"worker cleanup error: {e!r}")
+                logging.getLogger("output").error(f"worker cleanup error: {e!r}")
 
         # Try to flush remaining items quickly
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._queue.join(), timeout=0.5)
-        except asyncio.TimeoutError:
-            pass
 
     async def flush_and_stop(self) -> None:
         """Stop the buffered output and wait for complete queue drain."""
@@ -163,13 +167,13 @@ class BufferedOutputProtocol(OutputProtocol):
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                logging.getLogger('output').error(f"worker cleanup error: {e!r}")
-                
+                logging.getLogger("output").error(f"worker cleanup error: {e!r}")
+
     async def send_frame(self, frame_data: bytes, metadata: FrameMetadata) -> None:
         """Queue a frame for sending."""
         if not self._running:
             return
-            
+
         if self._queue.full():
             # Drop oldest frame to make room
             try:
@@ -178,14 +182,14 @@ class BufferedOutputProtocol(OutputProtocol):
                 self.metrics.queue_drops += 1
             except asyncio.QueueEmpty:
                 pass
-                
+
         await self._queue.put((frame_data, metadata))
-        
+
     @abstractmethod
     async def _send_frame_internal(self, frame_data: bytes, metadata: FrameMetadata) -> None:
         """Internal frame sending implementation."""
         pass
-        
+
     async def _worker_loop(self) -> None:
         """Worker loop that processes the frame queue."""
         try:
@@ -196,41 +200,39 @@ class BufferedOutputProtocol(OutputProtocol):
                     self.metrics.frames_sent += 1
                     self.metrics.bytes_sent += len(frame_data)
                 except Exception as e:
-                    logging.getLogger('output').error(f"frame send error: {e!r}")
+                    logging.getLogger("output").error(f"frame send error: {e!r}")
                 finally:
                     self._queue.task_done()
-                    
+
                 # Update queue metrics
                 current_size = self._queue.qsize()
                 self.metrics.max_queue_size = max(self.metrics.max_queue_size, current_size)
-                    
+
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logging.getLogger('output').error(f"worker loop error: {e!r}")
-
-
+            logging.getLogger("output").error(f"worker loop error: {e!r}")
 
 
 class OutputProtocolFactory:
     """Factory for creating output protocol instances."""
-    
-    _protocols: Dict[str, type] = {}
-    
+
+    _protocols: ClassVar[dict[str, type]] = {}
+
     @classmethod
     def register(cls, protocol_name: str, protocol_class: type) -> None:
         """Register a new output protocol."""
         cls._protocols[protocol_name] = protocol_class
-        
+
     @classmethod
     def create(cls, target: OutputTarget, stream_options: StreamOptions) -> OutputProtocol:
         """Create an output protocol instance."""
         protocol_class = cls._protocols.get(target.protocol)
         if not protocol_class:
             raise ValueError(f"Unknown output protocol: {target.protocol}")
-            
+
         return protocol_class(target, stream_options)
-        
+
     @classmethod
     def list_protocols(cls) -> list[str]:
         """List available protocol names."""

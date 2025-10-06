@@ -3,14 +3,14 @@
 
 import json
 import logging
-import os
-import tomllib
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Any, ClassVar
 
+import tomllib
 import yaml
 
 
-DEFAULT_CONFIG: Dict[str, Any] = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "hw": {"prefer": "auto"},
     "video": {
         "expand_mode": 2,  # 0=never, 1=auto(limited->full), 2=force
@@ -20,8 +20,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "probe_frames": 24,  # More frames for stability
             "luma_thresh": 16,  # Lower threshold for conservative detection
             "max_bar_ratio": 0.15,  # More conservative cropping limit
-            "min_bar_px": 2
-        }
+            "min_bar_px": 2,
+        },
     },
     "playback": {"loop": True},
     "youtube": {
@@ -29,7 +29,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "cache": {
             "enabled": True,
             "max_size": 5242880,  # 5MB - use FFmpeg cache: protocol for videos under this size
-        }
+        },
     },
     # Still-image quality controls for tiny/low-DPI targets
     "image": {
@@ -43,13 +43,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "unsharp": {"amount": 0.0, "radius": 0.6, "threshold": 2},
         # Frame caching for animated GIFs with loop=true
         "frame_cache_mb": 32,  # Max memory for cached frames (0 = disabled)
-        "frame_cache_min_frames": 5  # Only cache if animation has >= N frames
+        "frame_cache_min_frames": 5,  # Only cache if animation has >= N frames
     },
     "log": {
         "send_ms": False,
         "rate_ms": 5000,
         "level": "info",
-        "metrics": True
+        "metrics": True,
     },
     "net": {
         "win_timer_res": True,
@@ -57,37 +57,38 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "spread_max_fps": 60,
         "spread_min_ms": 3.0,
         "spread_max_sleeps": 0,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
     },
     # Optional resend policy for single-frame (non-looping) stills over UDP.
     "playback_still": {
         "burst": 3,
         "spacing_ms": 100,
         "tail_s": 2.0,
-        "tail_hz": 2
-    }
+        "tail_hz": 2,
+    },
 }
 
 
-def load_config_file(path: str) -> Dict[str, Any]:
+def load_config_file(path: str) -> dict[str, Any]:
     """Load configuration from a file (YAML, TOML, or JSON)."""
-    logger = logging.getLogger('config')
-    ext = os.path.splitext(path)[1].lower()
+    logger = logging.getLogger("config")
+    path_obj = Path(path)
+    ext = path_obj.suffix.lower()
 
-    if not os.path.exists(path):
+    if not path_obj.exists():
         return {}
 
     try:
         if ext in (".yaml", ".yml"):
-            with open(path, "r", encoding="utf-8") as f:
+            with Path(path).open(encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
 
         elif ext == ".toml":
-            with open(path, "rb") as f:
+            with Path(path).open("rb") as f:
                 return tomllib.load(f) or {}
 
         elif ext == ".json":
-            with open(path, "r", encoding="utf-8") as f:
+            with Path(path).open(encoding="utf-8") as f:
                 return json.load(f) or {}
 
         else:
@@ -99,7 +100,7 @@ def load_config_file(path: str) -> Dict[str, Any]:
         return {}
 
 
-def deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+def deep_update(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
     """Deep merge configuration dictionaries."""
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
@@ -109,7 +110,7 @@ def deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
     return dst
 
 
-def load_config(path: Optional[str] = None) -> Dict[str, Any]:
+def load_config(path: str | None = None) -> dict[str, Any]:
     """Load configuration with defaults and optional file override."""
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # Deep copy
 
@@ -121,26 +122,28 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
 
 class Config:
     """Configuration singleton."""
-    
-    _instance = None
-    _config: Dict[str, Any] = {}
-    
+
+    _instance: ClassVar["Config | None"] = None
+    _config: ClassVar[dict[str, Any]] = {}
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
-    def load(self, path: Optional[str] = None) -> None:
+
+    @classmethod
+    def load(cls, path: str | None = None) -> None:
         """Load configuration from file."""
-        self._config = load_config(path)
-        
-    def get(self, key: Optional[str] = None) -> Any:
+        cls._config = load_config(path)
+
+    @classmethod
+    def get(cls, key: str | None = None) -> Any:
         """Get configuration value by key path (e.g., 'video.fit')."""
         if key is None:
-            return self._config
+            return cls._config
 
-        keys = key.split('.')
-        value = self._config
+        keys = key.split(".")
+        value = cls._config
 
         for k in keys:
             if isinstance(value, dict) and k in value:
@@ -149,27 +152,27 @@ class Config:
                 raise KeyError(f"Configuration key not found: {key}")
 
         return value
-        
+
     def set(self, key: str, value: Any) -> None:
         """Set configuration value by key path."""
-        keys = key.split('.')
+        keys = key.split(".")
         target = self._config
-        
+
         for k in keys[:-1]:
             if k not in target:
                 target[k] = {}
             target = target[k]
-            
+
         target[keys[-1]] = value
-        
-    def update(self, updates: Dict[str, Any]) -> None:
+
+    def update(self, updates: dict[str, Any]) -> None:
         """Update configuration with dictionary."""
         deep_update(self._config, updates)
-        
+
     def __getitem__(self, key: str) -> Any:
         """Allow dict-like access."""
         return self.get(key)
-        
+
     def __setitem__(self, key: str, value: Any) -> None:
         """Allow dict-like assignment."""
         self.set(key, value)

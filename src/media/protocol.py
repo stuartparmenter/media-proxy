@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 from abc import ABC, abstractmethod
-from typing import Iterator, Tuple, Dict, Any, Optional, TYPE_CHECKING
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, ClassVar
+
 
 if TYPE_CHECKING:
     from ..streaming.options import StreamOptions
@@ -14,7 +16,7 @@ class FrameIterator(ABC):
     All iterators must implement async_init() for non-blocking resource initialization.
     """
 
-    def __init__(self, src_url: str, stream_options: 'StreamOptions'):
+    def __init__(self, src_url: str, stream_options: "StreamOptions"):
         self.src_url = src_url
         self.stream_options = stream_options
 
@@ -28,7 +30,7 @@ class FrameIterator(ABC):
         pass
 
     @abstractmethod
-    def __iter__(self) -> Iterator[Tuple[bytes, float]]:
+    def __iter__(self) -> Iterator[tuple[bytes, float]]:
         """Iterate over frames, yielding (rgb888_bytes, delay_ms) tuples."""
         pass
 
@@ -47,7 +49,7 @@ class FrameIterator(ABC):
 class FrameIteratorFactory:
     """Factory for creating appropriate frame iterators based on source type."""
 
-    _iterators: Dict[str, type] = {}
+    _iterators: ClassVar[dict[str, type]] = {}
 
     @classmethod
     def register(cls, name: str, iterator_class: type) -> None:
@@ -55,8 +57,13 @@ class FrameIteratorFactory:
         cls._iterators[name] = iterator_class
 
     @classmethod
-    async def create(cls, src_url: str, stream_options: 'StreamOptions',
-                     resolved_url: Optional[str] = None, http_opts: Optional[dict] = None) -> FrameIterator:
+    async def create(
+        cls,
+        src_url: str,
+        stream_options: "StreamOptions",
+        resolved_url: str | None = None,
+        http_opts: dict | None = None,
+    ) -> FrameIterator:
         """Create and initialize the appropriate frame iterator for the given source.
 
         Args:
@@ -67,14 +74,14 @@ class FrameIteratorFactory:
         """
         _ensure_iterators_registered()
 
-        for name, iterator_class in cls._iterators.items():
+        for _name, iterator_class in cls._iterators.items():
             if iterator_class.can_handle(src_url):  # type: ignore[attr-defined]  # can_handle is a class method on all registered iterators
                 iterator = iterator_class(src_url, stream_options)
 
                 # Set optional properties before initialization (for PyAV iterators)
-                if resolved_url and hasattr(iterator, 'real_src_url'):
+                if resolved_url and hasattr(iterator, "real_src_url"):
                     iterator.real_src_url = resolved_url
-                if http_opts and hasattr(iterator, 'http_opts'):
+                if http_opts and hasattr(iterator, "http_opts"):
                     iterator.http_opts = http_opts
 
                 # Initialize the iterator
@@ -98,12 +105,14 @@ def _ensure_iterators_registered():
 
     try:
         from .images import PilFrameIterator
+
         FrameIteratorFactory.register("pil", PilFrameIterator)
     except ImportError:
         pass
 
     try:
         from .video import PyAvFrameIterator
+
         FrameIteratorFactory.register("pyav", PyAvFrameIterator)
     except ImportError:
         pass

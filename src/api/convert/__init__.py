@@ -5,6 +5,5 @@
 
 from .animimg import handle_animimg_request
 
-__all__ = [
-    "handle_animimg_request"
-]
+
+__all__ = ["handle_animimg_request"]

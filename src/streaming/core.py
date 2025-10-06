@@ -2,29 +2,29 @@
 # SPDX-License-Identifier: MIT
 
 import asyncio
+import contextlib
 import logging
-import os
-from typing import Dict, Any, AsyncIterator, Tuple, Optional
+import urllib.error
+from collections.abc import AsyncIterator
+from typing import Any
 from urllib.parse import unquote
 
-import urllib.error
 import av.error
 import yt_dlp
-from ..config import Config
 
-from ..utils.fields import ControlFields
-from .options import StreamOptions
-from ..media.sources import resolve_media_source, MediaUnavailableError, is_internal_url, rewrite_internal_url
-from ..media.protocol import FrameIteratorFactory
+from ..config import Config
 from ..media.images import cleanup_active_image_sources
-from ..output.protocol import OutputProtocolFactory, OutputTarget, FrameMetadata, BufferedOutputProtocol
+from ..media.protocol import FrameIteratorFactory
+from ..media.sources import MediaUnavailableError, is_internal_url, resolve_media_source, rewrite_internal_url
+from ..output.protocol import BufferedOutputProtocol, FrameMetadata, OutputProtocolFactory, OutputTarget
 from ..utils.helpers import is_youtube_url
+from .options import StreamOptions
 
 
 # Removed _get_gif_fps_from_pyav - PIL handles GIF timing directly
 
 
-async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[bytes, float]]:
+async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[tuple[bytes, float]]:
     """
     Stream frames from a media source with automatic retry and error recovery.
     """
@@ -46,19 +46,17 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
             # Check if we should enable FFmpeg caching
             if source.should_enable_cache(stream_options.loop):
                 config = Config()
-                filesize = source.info.get('filesize') or source.info.get('filesize_approx')
-                max_size = config.get('youtube.cache.max_size')
+                filesize = source.info.get("filesize") or source.info.get("filesize_approx")
+                max_size = config.get("youtube.cache.max_size")
                 max_size_mb = max_size / 1024 / 1024
-                size_str = f"{filesize/1024/1024:.1f}MB" if filesize else "unknown"
-                logging.getLogger('streaming').info(
-                    f"Enabling FFmpeg cache: size={size_str}, max={max_size_mb:.0f}MB"
-                )
+                size_str = f"{filesize / 1024 / 1024:.1f}MB" if filesize else "unknown"
+                logging.getLogger("streaming").info(f"Enabling FFmpeg cache: size={size_str}, max={max_size_mb:.0f}MB")
                 stream_options.enable_cache = True
 
         except Exception as e:
             if isinstance(e, yt_dlp.DownloadError):  # type: ignore[attr-defined]
                 # YouTube format unavailable - re-raise for upstream handling
-                logging.getLogger('streaming').error(f"YouTube DownloadError: {e}")
+                logging.getLogger("streaming").error(f"YouTube DownloadError: {e}")
                 raise MediaUnavailableError(f"YouTube resolution failed: {e}", original_src, e) from e
             else:
                 # Other exceptions during URL resolution - re-raise
@@ -71,19 +69,21 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
             http_options = None
             if is_youtube_url(src_url) and source_options:
                 http_options = source_options.copy()
-                http_options.update({
-                    'reconnect': '1',
-                    'reconnect_streamed': '1',
-                    'reconnect_delay_max': '5',
-                    'timeout': '10000000',
-                })
+                http_options.update(
+                    {
+                        "reconnect": "1",
+                        "reconnect_streamed": "1",
+                        "reconnect_delay_max": "5",
+                        "timeout": "10000000",
+                    }
+                )
 
             # Create and initialize iterator (factory handles property setting)
             iterator = await FrameIteratorFactory.create(
                 src_url,
                 stream_options,
                 resolved_url=resolved_url if is_youtube_url(src_url) else None,
-                http_opts=http_options
+                http_opts=http_options,
             )
 
             # Iterate frames - the iterator handles looping internally
@@ -99,33 +99,39 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
             # Iterator exhausted
             break
 
-
         except urllib.error.HTTPError as e:
             # HTTP errors from images.py - convert to MediaUnavailableError for consistent handling
             raise MediaUnavailableError(f"HTTP {e.code}: {e.reason}", original_src, e) from e
         except urllib.error.URLError as e:
             # Network errors from images.py - convert to MediaUnavailableError for consistent handling
             raise MediaUnavailableError(f"Network error: {e.reason}", original_src, e) from e
-        except (av.error.HTTPError, av.error.HTTPClientError, av.error.HTTPServerError, av.error.InvalidDataError, av.error.ValueError) as e:
+        except (
+            av.error.HTTPError,
+            av.error.HTTPClientError,
+            av.error.HTTPServerError,
+            av.error.InvalidDataError,
+            av.error.ValueError,
+        ) as e:
             # PyAV errors from video.py
-            errno_val = getattr(e, 'errno', None)
+            errno_val = getattr(e, "errno", None)
             if is_youtube_url(original_src):
                 # Log connection-specific diagnostics for YouTube streams
                 if errno_val == 5:
-                    logging.getLogger('streaming').warning(
-                        f"YouTube I/O error (errno 5 - connection lost): {e} "
-                        f"- attempt {retry_count + 1}/{max_retries}"
+                    logging.getLogger("streaming").warning(
+                        f"YouTube I/O error (errno 5 - connection lost): {e} - attempt {retry_count + 1}/{max_retries}"
                     )
                 else:
-                    logging.getLogger('streaming').info(
-                        f"YouTube error detected (errno={errno_val}): {e}"
-                    )
+                    logging.getLogger("streaming").info(f"YouTube error detected (errno={errno_val}): {e}")
 
                 # For YouTube URLs, these errors likely mean URL expiration or connection loss - trigger retry
                 retry_count += 1
                 if retry_count > max_retries:
-                    raise MediaUnavailableError(f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e) from e
-                logging.getLogger('streaming').info(f"YouTube URL issue (attempt {retry_count}/{max_retries}), re-resolving...")
+                    raise MediaUnavailableError(
+                        f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e
+                    ) from e
+                logging.getLogger("streaming").info(
+                    f"YouTube URL issue (attempt {retry_count}/{max_retries}), re-resolving..."
+                )
                 await asyncio.sleep(0.5)
                 continue
             else:
@@ -134,7 +140,7 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
         except FileNotFoundError as e:
             # File not found - re-raise with original source context
             raise FileNotFoundError(f"cannot open source: {original_src}") from e
-        except RuntimeError as e:
+        except RuntimeError:
             # RuntimeErrors are not retryable
             raise
         except Exception as e:
@@ -145,10 +151,8 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[Tuple[by
             break
 
 
-def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task:
+def create_streaming_task(session, params: dict[str, Any]) -> asyncio.Task:
     """Create a streaming task that connects media input to output."""
-    config = Config()
-
     # Resolve internal: URLs using session's server info
     src = params.get("src")
     if src and is_internal_url(src):
@@ -173,10 +177,11 @@ def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task:
         except asyncio.CancelledError:
             return
         except Exception as e:
-            logging.getLogger('streaming').error(f"out={stream_options.output_id} exception(): {e!r}")
+            logging.getLogger("streaming").error(f"out={stream_options.output_id} exception(): {e!r}")
             return
         if exc:
-            logging.getLogger('streaming').error(f"out={stream_options.output_id} crashed: {exc!r}")
+            logging.getLogger("streaming").error(f"out={stream_options.output_id} crashed: {exc!r}")
+
     task.add_done_callback(on_done)
 
     return task
@@ -184,14 +189,9 @@ def create_streaming_task(session, params: Dict[str, Any]) -> asyncio.Task:
 
 async def streaming_task(stream_options: StreamOptions):
     """Main streaming task that orchestrates media input -> processing -> output."""
-    config = Config()
-
     # Create output target and protocol
     target = OutputTarget(
-        host=stream_options.target_ip,
-        port=stream_options.ddp_port,
-        output_id=stream_options.output_id,
-        protocol="ddp"
+        host=stream_options.target_ip, port=stream_options.ddp_port, output_id=stream_options.output_id, protocol="ddp"
     )
 
     output = OutputProtocolFactory.create(target, stream_options)
@@ -208,15 +208,15 @@ async def streaming_task(stream_options: StreamOptions):
 
     except MediaUnavailableError as e:
         # Media source unavailable (HTTP/network errors) - stop this stream task
-        logging.getLogger('streaming').warning(f"{target.output_id} media unavailable: {e}")
+        logging.getLogger("streaming").warning(f"{target.output_id} media unavailable: {e}")
         return
     except FileNotFoundError as e:
         # Actual file not found - stop this stream task
-        logging.getLogger('streaming').warning(f"{target.output_id} file not found: {e}")
+        logging.getLogger("streaming").warning(f"{target.output_id} file not found: {e}")
         return
     except Exception as e:
         # Technical errors (codec issues, etc.) - stop this stream task
-        logging.getLogger('streaming').error(f"{target.output_id} technical error: {e}")
+        logging.getLogger("streaming").error(f"{target.output_id} technical error: {e}")
         return
     finally:
         # For non-looping content, ensure all packets are fully sent
@@ -243,7 +243,7 @@ async def _run_native_streaming(output, stream_options: StreamOptions):
             size=stream_options.size,
             format=stream_options.fmt,
             is_still=(not stream_options.loop and frames_emitted == 0),
-            is_last_frame=(not stream_options.loop and frames_emitted == 0)
+            is_last_frame=(not stream_options.loop and frames_emitted == 0),
         )
 
         # Send frame
@@ -264,7 +264,6 @@ async def _run_native_streaming(output, stream_options: StreamOptions):
             await asyncio.sleep(sleep_duration)
 
 
-
 async def _run_paced_streaming(output, stream_options: StreamOptions) -> None:
     """Run streaming with fixed pacing (producer + sampler pattern)."""
     import numpy as np
@@ -273,7 +272,7 @@ async def _run_paced_streaming(output, stream_options: StreamOptions) -> None:
     ema_alpha = stream_options.ema
 
     # Shared state
-    latest_frame: Dict[str, Optional[bytes]] = {"data": None}
+    latest_frame: dict[str, bytes | None] = {"data": None}
     latest_lock = asyncio.Lock()
 
     # Producer task
@@ -289,7 +288,7 @@ async def _run_paced_streaming(output, stream_options: StreamOptions) -> None:
     async def sampler() -> None:
         tick = 1.0 / pace_hz
         next_time = asyncio.get_event_loop().time()
-        ema_buf_f32: Optional[np.ndarray] = None
+        ema_buf_f32: np.ndarray | None = None
         seq = 0
 
         while True:
@@ -303,7 +302,7 @@ async def _run_paced_streaming(output, stream_options: StreamOptions) -> None:
                     if ema_buf_f32 is None or ema_buf_f32.shape != cur.shape:
                         ema_buf_f32 = cur.astype(np.float32, copy=True)
                     else:
-                        ema_buf_f32 *= (1.0 - ema_alpha)
+                        ema_buf_f32 *= 1.0 - ema_alpha
                         ema_buf_f32 += cur.astype(np.float32) * ema_alpha
                     output_data = ema_buf_f32.astype(np.uint8, copy=False).tobytes()
 
@@ -313,7 +312,7 @@ async def _run_paced_streaming(output, stream_options: StreamOptions) -> None:
                     timestamp_ms=asyncio.get_event_loop().time() * 1000,
                     delay_ms=tick * 1000,
                     size=stream_options.size,
-                    format=stream_options.fmt
+                    format=stream_options.fmt,
                 )
 
                 # Send frame
@@ -332,7 +331,5 @@ async def _run_paced_streaming(output, stream_options: StreamOptions) -> None:
         await producer_task
     finally:
         sampler_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await sampler_task
-        except asyncio.CancelledError:
-            pass

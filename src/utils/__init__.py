@@ -4,18 +4,20 @@
 """Utility modules for hardware detection, metrics, and helpers."""
 
 from .hardware import pick_hw_backend, set_windows_timer_resolution
-from .metrics import RateMeter, PerformanceTracker
-from .helpers import (
-    is_youtube_url, is_http_url, resolve_local_path,
-    compute_spacing_and_group
-)
+from .helpers import compute_spacing_and_group, is_http_url, is_youtube_url, resolve_local_path
+from .metrics import PerformanceTracker, RateMeter
+
 
 __all__ = [
-    # Hardware
-    "pick_hw_backend", "set_windows_timer_resolution",
+    "PerformanceTracker",
     # Metrics
-    "RateMeter", "PerformanceTracker",
+    "RateMeter",
+    "compute_spacing_and_group",
+    "is_http_url",
     # Helpers
-    "is_youtube_url", "is_http_url", "resolve_local_path",
-    "compute_spacing_and_group"
+    "is_youtube_url",
+    # Hardware
+    "pick_hw_backend",
+    "resolve_local_path",
+    "set_windows_timer_resolution",
 ]

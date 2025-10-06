@@ -3,15 +3,17 @@
 
 import io
 import logging
+
 import numpy as np
-from PIL import Image, ImageFilter, ImageCms
+from PIL import Image, ImageCms, ImageFilter
 from PIL.ImageCms import Intent
-from typing import Tuple, Optional
+
 from ..config import Config
 
+
 # Module-level LUT caches for gamma correction
-_LINEAR_LUT: Optional[np.ndarray] = None
-_SRGB_LUT: Optional[np.ndarray] = None
+_LINEAR_LUT: np.ndarray | None = None
+_SRGB_LUT: np.ndarray | None = None
 
 
 def convert_to_srgb(img: Image.Image) -> Image.Image:
@@ -30,41 +32,37 @@ def convert_to_srgb(img: Image.Image) -> Image.Image:
 
     try:
         # Check if image has an ICC profile
-        if 'icc_profile' not in img.info:
+        if "icc_profile" not in img.info:
             return img
 
         # Get the embedded ICC profile
-        icc_profile = img.info['icc_profile']
+        icc_profile = img.info["icc_profile"]
         if not icc_profile:
             return img
 
         # Create profile objects
         source_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_profile))
-        srgb_profile = ImageCms.createProfile('sRGB')
+        srgb_profile = ImageCms.createProfile("sRGB")
 
         # Check if source is already sRGB (avoid unnecessary conversion)
         try:
             source_colorspace = ImageCms.getProfileName(source_profile).lower()
-            if 'srgb' in source_colorspace:
+            if "srgb" in source_colorspace:
                 return img
-        except:
+        except Exception:  # noqa: S110  # Skip conversion if profile check fails
             pass
 
         # Get profile name for logging
         try:
             profile_name = ImageCms.getProfileName(source_profile)
-        except:
+        except Exception:
             profile_name = "unknown"
 
-        logging.getLogger('processing').info(f"Converting {profile_name.strip()} -> sRGB")
+        logging.getLogger("processing").info(f"Converting {profile_name.strip()} -> sRGB")
 
         # Create transformation from source to sRGB
         transform = ImageCms.buildTransformFromOpenProfiles(
-            source_profile,
-            srgb_profile,
-            img.mode,
-            img.mode,
-            renderingIntent=Intent.RELATIVE_COLORIMETRIC
+            source_profile, srgb_profile, img.mode, img.mode, renderingIntent=Intent.RELATIVE_COLORIMETRIC
         )
 
         # Apply the transformation
@@ -73,17 +71,17 @@ def convert_to_srgb(img: Image.Image) -> Image.Image:
 
         # Remove the old ICC profile
         converted_img.info = img.info.copy()
-        if 'icc_profile' in converted_img.info:
-            del converted_img.info['icc_profile']
+        if "icc_profile" in converted_img.info:
+            del converted_img.info["icc_profile"]
 
         return converted_img
 
     except Exception as e:
-        logging.getLogger('processing').warning(f"Color conversion failed: {e}")
+        logging.getLogger("processing").warning(f"Color conversion failed: {e}")
         return img
 
 
-def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = "pad") -> bytes:
+def resize_pad_to_rgb_bytes(img: Image.Image, size: tuple[int, int], fit: str = "pad") -> bytes:
     """Resize image to target size using specified fit mode, return RGB888 bytes.
 
     Args:
@@ -104,13 +102,12 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
     # Choose resample method - optimized for LED displays
     cfg = config.get("image")
     method_s = str(cfg.get("method")).lower()
-    M = Image.Resampling
-    METHOD_MAP = {
-        "lanczos": M.LANCZOS,
-        "bicubic": M.BICUBIC,
-        "bilinear": M.BILINEAR,
-        "box":     M.BOX,       # area-average; good for big downscales, softer micro-contrast
-        "nearest": M.NEAREST,   # use for pixel art/UI icons
+    method_map = {
+        "lanczos": Image.Resampling.LANCZOS,
+        "bicubic": Image.Resampling.BICUBIC,
+        "bilinear": Image.Resampling.BILINEAR,
+        "box": Image.Resampling.BOX,  # area-average; good for big downscales, softer micro-contrast
+        "nearest": Image.Resampling.NEAREST,  # use for pixel art/UI icons
     }
 
     # Compute scale factor to determine optimal resampling
@@ -120,32 +117,28 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
     scale = min(w / src_w, h / src_h) if src_w and src_h else 1.0
 
     # LED display optimized resampling strategy
-    if method_s == "auto" or method_s not in METHOD_MAP:
+    if method_s == "auto" or method_s not in method_map:
         # Auto-select based on scale for LED displays
         if scale >= 1.0:
             # Upscaling: use nearest to preserve pixel boundaries
-            resample = M.NEAREST
+            resample = Image.Resampling.NEAREST
         elif scale >= 0.5:
             # Modest downscaling: check if it's close to integer ratio
             x_ratio = src_w / w
             y_ratio = src_h / h
             avg_ratio = (x_ratio + y_ratio) / 2
-            if abs(avg_ratio - round(avg_ratio)) < 0.1:
-                # Close to integer ratio, use nearest for clean pixels
-                resample = M.NEAREST
-            else:
-                # Non-integer ratio, use box for smooth downscaling
-                resample = M.BOX
+            # Close to integer ratio: use nearest for clean pixels; otherwise use box for smooth downscaling
+            resample = Image.Resampling.NEAREST if abs(avg_ratio - round(avg_ratio)) < 0.1 else Image.Resampling.BOX
         else:
             # Heavy downscaling: use box to avoid aliasing
-            resample = M.BOX
+            resample = Image.Resampling.BOX
     else:
-        resample = METHOD_MAP[method_s]
+        resample = method_map[method_s]
 
     # Check if this is a paletted image that we can preserve
-    is_paletted = img.mode == 'P'
+    is_paletted = img.mode == "P"
     original_palette = None
-    if is_paletted and hasattr(img, 'palette') and img.palette:
+    if is_paletted and hasattr(img, "palette") and img.palette:
         # Extract the palette as RGB values
         palette_data = img.palette.getdata()[1]  # (mode, palette_bytes)
         if len(palette_data) >= 3:  # Ensure we have RGB data
@@ -163,11 +156,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
         if _LINEAR_LUT is None:
             # build once
             x = np.arange(256, dtype=np.float32) / 255.0
-            lut = np.where(
-                x <= 0.04045,
-                x / 12.92,
-                ((x + 0.055) / 1.055) ** 2.4
-            )
+            lut = np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
             _LINEAR_LUT = (lut * 65535.0 + 0.5).astype(np.uint16)  # promote for precision
         return _LINEAR_LUT[rgb_u8]
 
@@ -175,11 +164,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
         global _SRGB_LUT
         if _SRGB_LUT is None:
             y = np.linspace(0.0, 1.0, 65536, dtype=np.float32)
-            lut = np.where(
-                y <= 0.0031308,
-                y * 12.92,
-                1.055 * (y ** (1/2.4)) - 0.055
-            )
+            lut = np.where(y <= 0.0031308, y * 12.92, 1.055 * (y ** (1 / 2.4)) - 0.055)
             _SRGB_LUT = (lut * 255.0 + 0.5).astype(np.uint8)
         return _SRGB_LUT[lin_u16]
 
@@ -194,10 +179,10 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
         palette_indices = np.asarray(img, dtype=np.uint8)
 
         # Resize the index array using nearest neighbor to preserve palette integrity
-        index_img = Image.fromarray(palette_indices, mode='L')
+        index_img = Image.fromarray(palette_indices, mode="L")
         new_w = max(1, int(round(src_w * scale)))
         new_h = max(1, int(round(src_h * scale)))
-        resized_indices = index_img.resize((new_w, new_h), resample=M.NEAREST)
+        resized_indices = index_img.resize((new_w, new_h), resample=Image.Resampling.NEAREST)
 
         # Convert back to RGB using original palette
         indices_array = np.asarray(resized_indices, dtype=np.uint8)
@@ -215,14 +200,14 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
 
             # Create RGBA image with alpha channel
             rgba_array = np.concatenate([rgb_array, alpha_mask[..., np.newaxis]], axis=-1)
-            rgba_img = Image.fromarray(rgba_array.astype(np.uint8), mode='RGBA')
+            rgba_img = Image.fromarray(rgba_array.astype(np.uint8), mode="RGBA")
 
             # Blend with black background
             background = Image.new("RGB", rgba_img.size, (0, 0, 0))
-            background.paste(rgba_img, mask=Image.fromarray(alpha_mask, mode='L'))
+            background.paste(rgba_img, mask=Image.fromarray(alpha_mask, mode="L"))
             im = background
         else:
-            im = Image.fromarray(rgb_array.astype(np.uint8), mode='RGB')
+            im = Image.fromarray(rgb_array.astype(np.uint8), mode="RGB")
     else:
         # Convert to RGB early (handle "L", "LA", "RGBA", etc.)
         if img.mode != "RGB":
@@ -272,7 +257,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
 
         new_size = (new_w, new_h)
 
-        if gamma_correct and resample not in (M.NEAREST,):
+        if gamma_correct and resample not in (Image.Resampling.NEAREST,):
             # Work in linear: resize each channel individually as 16-bit, then convert back to sRGB u8
             arr = np.asarray(img, dtype=np.uint8)
             lin = _to_linear_u8(arr)  # (H,W,3) uint16
@@ -281,8 +266,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
             g = Image.fromarray(lin[..., 1]).convert("I;16").resize(new_size, resample=resample)
             b = Image.fromarray(lin[..., 2]).convert("I;16").resize(new_size, resample=resample)
             lin_res = np.stack(
-                [np.array(r, dtype=np.uint16), np.array(g, dtype=np.uint16), np.array(b, dtype=np.uint16)],
-                axis=-1
+                [np.array(r, dtype=np.uint16), np.array(g, dtype=np.uint16), np.array(b, dtype=np.uint16)], axis=-1
             )  # (new_h,new_w,3) uint16
             srgb_u8 = _to_srgb_u8(lin_res)  # (new_h,new_w,3) u8
             im = Image.fromarray(srgb_u8).convert("RGB")
@@ -312,7 +296,7 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: Tuple[int, int], fit: str = 
             canvas = Image.new("RGB", size, (0, 0, 0))
             canvas.paste(im, ((w - im.size[0]) // 2, (h - im.size[1]) // 2))
             im = canvas
-        
+
     return np.asarray(im, dtype=np.uint8).tobytes()
 
 

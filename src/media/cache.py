@@ -10,11 +10,12 @@ Provides common cache management for both images and videos:
 - Global cleanup tracking with weakref
 """
 
-import logging
-import os
-import weakref
 import atexit
+import contextlib
+import logging
+import weakref
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 from weakref import WeakSet
 
@@ -26,10 +27,8 @@ _active_sources: WeakSet[Any] = weakref.WeakSet()
 def _cleanup_all_sources():
     """Emergency cleanup function called on exit."""
     for source in list(_active_sources):
-        try:
+        with contextlib.suppress(Exception):  # atexit cleanup - logging/raising would be problematic
             source.cleanup()
-        except Exception:
-            pass
 
 
 # Register emergency cleanup
@@ -40,7 +39,7 @@ def cleanup_active_sources():
     """Clean up all active sources (called when streams stop)."""
     active_count = len(_active_sources)
     if active_count > 0:
-        logging.getLogger('cache').debug(f"Cleaning up {active_count} active sources")
+        logging.getLogger("cache").debug(f"Cleaning up {active_count} active sources")
         _cleanup_all_sources()
 
 
@@ -77,18 +76,17 @@ class TempCachedFile(CachedMediaFile):
             return
 
         try:
-            if os.path.exists(self.temp_path):
-                os.unlink(self.temp_path)
-                logging.getLogger('cache').debug(f"Cleaned up temp file: {os.path.basename(self.temp_path)}")
+            temp_path_obj = Path(self.temp_path)
+            if temp_path_obj.exists():
+                temp_path_obj.unlink()
+                logging.getLogger("cache").debug(f"Cleaned up temp file: {temp_path_obj.name}")
         except Exception as e:
-            logging.getLogger('cache').warning(f"Temp file cleanup warning: {e}")
+            logging.getLogger("cache").warning(f"Temp file cleanup warning: {e}")
         finally:
             self._cleaned = True
             # Remove from tracking (weakref will handle this automatically too)
-            try:
+            with contextlib.suppress(BaseException):  # Destructor cleanup - must not raise
                 _active_sources.discard(self)
-            except:
-                pass
 
 
 class LocalCachedFile(CachedMediaFile):
@@ -110,7 +108,5 @@ class LocalCachedFile(CachedMediaFile):
             return
         self._cleaned = True
         # Remove from tracking (weakref will handle this automatically too)
-        try:
+        with contextlib.suppress(BaseException):  # Destructor cleanup - must not raise
             _active_sources.discard(self)
-        except:
-            pass

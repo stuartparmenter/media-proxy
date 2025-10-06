@@ -3,4 +3,5 @@
 
 from .placeholder import handle_placeholder_request
 
-__all__ = ['handle_placeholder_request']
+
+__all__ = ["handle_placeholder_request"]

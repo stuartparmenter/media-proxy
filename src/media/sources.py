@@ -3,13 +3,13 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 from urllib.parse import unquote, urlparse, urlunparse
 
 import yt_dlp
 
 from ..config import Config
-from ..utils.helpers import is_youtube_url, headers_dict_to_ffmpeg_opt
+from ..utils.helpers import headers_dict_to_ffmpeg_opt, is_youtube_url
 
 
 def is_internal_url(url: str) -> bool:
@@ -31,24 +31,17 @@ def rewrite_internal_url(url: str, server_host: str) -> str:
     parsed = urlparse(url)
     new_path = f"/api/internal/{parsed.path}"
 
-    rewritten = urlunparse((
-        'http',
-        server_host,
-        new_path,
-        '',
-        parsed.query,
-        ''
-    ))
+    rewritten = urlunparse(("http", server_host, new_path, "", parsed.query, ""))
 
     return rewritten
 
 
-def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: bool = True) -> Tuple[str, None]:
+def build_yt_dlp_format(width: int, height: int, mode: str | None = None, video_only: bool = True) -> tuple[str, None]:
     """
     Build optimized yt-dlp format selector based on target resolution and hardware.
 
     Args:
-        W, H: Target minimum resolution (width, height)
+        width, height: Target minimum resolution (width, height)
         mode: Hardware acceleration mode (None, "vaapi", "qsv", "cuda", "videotoolbox", "d3d11va")
         video_only: Prefer video-only streams, fallback to combined if needed
 
@@ -58,43 +51,52 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
     # Hardware-optimized codec preferences
     codec_preferences = {
         "vaapi": ["av01", "vp9", "vp09", "h265", "hevc", "hev1", "h264", "avc1", "avc3"],  # Intel/AMD Linux
-        "qsv": ["h265", "hevc", "hev1", "h264", "avc1", "avc3", "av01", "vp9"],          # Intel Quick Sync
-        "cuda": ["av01", "h265", "hevc", "hev1", "h264", "avc1", "avc3", "vp9"],         # NVIDIA NVDEC (RTX 30+ has AV1 decode)
-        "videotoolbox": ["h264", "avc1", "avc3", "h265", "hevc", "hev1", "av01", "vp9"], # macOS
-        "d3d11va": ["h264", "avc1", "avc3", "h265", "hevc", "hev1", "av01", "vp9"],      # Windows D3D11
-        None: ["h264", "avc1", "avc3", "vp9", "vp09", "h265", "hevc", "hev1", "av01"]    # CPU fallback
+        "qsv": ["h265", "hevc", "hev1", "h264", "avc1", "avc3", "av01", "vp9"],  # Intel Quick Sync
+        "cuda": [
+            "av01",
+            "h265",
+            "hevc",
+            "hev1",
+            "h264",
+            "avc1",
+            "avc3",
+            "vp9",
+        ],  # NVIDIA NVDEC (RTX 30+ has AV1 decode)
+        "videotoolbox": ["h264", "avc1", "avc3", "h265", "hevc", "hev1", "av01", "vp9"],  # macOS
+        "d3d11va": ["h264", "avc1", "avc3", "h265", "hevc", "hev1", "av01", "vp9"],  # Windows D3D11
+        None: ["h264", "avc1", "avc3", "vp9", "vp09", "h265", "hevc", "hev1", "av01"],  # CPU fallback
     }
 
     codecs = codec_preferences.get(mode, codec_preferences[None])
     vcodec_regex = "^(" + "|".join(codecs) + ")$"
 
     # Calculate reasonable max resolution to avoid extreme over-fetching
-    max_H = min(H * 4, 1080)  # Cap at 1080p unless display is >270px tall
+    max_height = min(height * 4, 1080)  # Cap at 1080p unless display is >270px tall
 
     # For very small displays, be much more aggressive about resolution capping
-    if H <= 64:  # For displays 64px or smaller (like 64x64)
-        max_H = min(max_H, 480)  # Cap at 480p max for tiny displays
-    elif H <= 128:  # For displays 65-128px
-        max_H = min(max_H, 720)  # Cap at 720p
+    if height <= 64:  # For displays 64px or smaller (like 64x64)
+        max_height = min(max_height, 480)  # Cap at 480p max for tiny displays
+    elif height <= 128:  # For displays 65-128px
+        max_height = min(max_height, 720)  # Cap at 720p
 
     # Determine optimal resolution tiers based on target size
     # Start with closest match to target, then progressively larger
     resolutions = []
-    if H <= 144:
+    if height <= 144:
         resolutions = [144, 240, 360, 480]  # For very small displays, start with 144p
-    elif H <= 240:
+    elif height <= 240:
         resolutions = [240, 144, 360, 480, 720]
-    elif H <= 360:
+    elif height <= 360:
         resolutions = [360, 240, 480, 720, 1080]
-    elif H <= 480:
+    elif height <= 480:
         resolutions = [480, 360, 240, 720, 1080]  # Include smaller fallbacks
-    elif H <= 720:
+    elif height <= 720:
         resolutions = [720, 1080, 480, 360, 240]  # Prefer going up to 1080p before falling back
     else:
         resolutions = [1080, 720, 480, 360, 240, 144]  # Include all smaller fallbacks
 
-    # Filter resolutions that exceed our max_H cap
-    resolutions = [r for r in resolutions if r <= max_H]
+    # Filter resolutions that exceed our max_height cap
+    resolutions = [r for r in resolutions if r <= max_height]
 
     # Ensure we have at least one fallback
     if not resolutions:
@@ -110,38 +112,42 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
     # IMPORTANT: Only allow https protocol - avoid playlists (m3u8, dash) and streaming protocols
     if try_60fps:
         for codec in codecs:
-            components.append(f'bv*[fps>=60][vcodec*={codec}][height>=720][height<=720][protocol=https]')
+            components.append(f"bv*[fps>=60][vcodec*={codec}][height>=720][height<=720][protocol=https]")
             if not video_only:
-                components.append(f'b[fps>=60][vcodec*={codec}][height>=720][height<=720][protocol=https]')
+                components.append(f"b[fps>=60][vcodec*={codec}][height>=720][height<=720][protocol=https]")
 
     # Build codec-specific selectors for each resolution
     # This ensures explicit codec priority ordering
     # IMPORTANT: Only allow https protocol - avoid playlists (m3u8, dash) and streaming protocols
     for res in resolutions:
         # For each codec in preference order, add specific selectors
-        for i, codec in enumerate(codecs):
+        for _i, codec in enumerate(codecs):
             # Then any fps - prioritize video-only
-            components.append(f'bv*[vcodec*={codec}][height>={res}][height<={res}][protocol=https]')
+            components.append(f"bv*[vcodec*={codec}][height>={res}][height<={res}][protocol=https]")
             if not video_only:
-                components.append(f'b[vcodec*={codec}][height>={res}][height<={res}][protocol=https]')
+                components.append(f"b[vcodec*={codec}][height>={res}][height<={res}][protocol=https]")
 
     # Fallback to any codec at each resolution - prioritize video-only
     for res in resolutions:
-        components.append(f'bv*[height>={res}][height<={res}][protocol=https]')
+        components.append(f"bv*[height>={res}][height<={res}][protocol=https]")
         if not video_only:
-            components.append(f'b[height>={res}][height<={res}][protocol=https]')
+            components.append(f"b[height>={res}][height<={res}][protocol=https]")
 
     # Final fallbacks for edge cases - prioritize video-only
-    components.append(f'bv*[vcodec~="{vcodec_regex}"][height>={H}][protocol=https]')  # Preferred codec, minimum height
-    components.append(f'bv*[height>={H}][protocol=https]')  # Any codec, minimum height
+    components.append(
+        f'bv*[vcodec~="{vcodec_regex}"][height>={height}][protocol=https]'
+    )  # Preferred codec, minimum height
+    components.append(f"bv*[height>={height}][protocol=https]")  # Any codec, minimum height
     components.append(f'bv*[vcodec~="{vcodec_regex}"][protocol=https]')  # Preferred codec, any resolution
-    components.append('bv*[protocol=https]')  # Any video-only stream (https only)
+    components.append("bv*[protocol=https]")  # Any video-only stream (https only)
 
     if not video_only:
-        components.append(f'b[vcodec~="{vcodec_regex}"][height>={H}][protocol=https]')  # Preferred codec, minimum height
-        components.append(f'b[height>={H}][protocol=https]')  # Any codec, minimum height
+        components.append(
+            f'b[vcodec~="{vcodec_regex}"][height>={height}][protocol=https]'
+        )  # Preferred codec, minimum height
+        components.append(f"b[height>={height}][protocol=https]")  # Any codec, minimum height
         components.append(f'b[vcodec~="{vcodec_regex}"][protocol=https]')  # Preferred codec, any resolution
-        components.append('b[protocol=https]')  # Any combined stream (https only)
+        components.append("b[protocol=https]")  # Any combined stream (https only)
 
     format_expr = "/".join(components)
 
@@ -149,16 +155,18 @@ def build_yt_dlp_format(W: int, H: int, mode: Optional[str] = None, video_only: 
     return format_expr, None
 
 
-
 class MediaUnavailableError(Exception):
     """Raised when a media source is temporarily unavailable (HTTP errors, network issues, etc.)."""
-    def __init__(self, message: str, url: str, original_error: Optional[Exception] = None):
+
+    def __init__(self, message: str, url: str, original_error: Exception | None = None):
         super().__init__(message)
         self.url = url
         self.original_error = original_error
 
 
-async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], hw_mode: Optional[str] = None) -> Tuple[str, Dict[str, str], Dict[str, Any]]:
+async def resolve_stream_url_async(
+    src_url: str, target_size: tuple[int, int], hw_mode: str | None = None
+) -> tuple[str, dict[str, str], dict[str, Any]]:
     """
     Async version of YouTube URL resolution.
     Resolve YouTube (and similar) page URLs into a direct media URL + HTTP headers
@@ -176,7 +184,7 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
     if not is_youtube_url(src_url):
         return src_url, {}, {}
 
-    logger = logging.getLogger('sources')
+    logger = logging.getLogger("sources")
 
     # Build optimized format selector based on target size and hardware
     if not target_size or len(target_size) != 2:
@@ -195,29 +203,18 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
     }
 
     # Debug: List available formats if debug logging is enabled
-    if logger.isEnabledFor(logging.DEBUG) and target_size:
-        logger.debug("Listing available formats for debugging...")
-        debug_opts = {
-            "quiet": False,
-            "listformats": True,
-        }
-        try:
-            with yt_dlp.YoutubeDL(debug_opts) as debug_ydl:  # type: ignore[arg-type]
-                debug_ydl.extract_info(src_url, download=False)
-        except Exception:
-            pass  # Don't fail if debug listing fails
-
     # Run the blocking yt-dlp operation in a thread pool
     loop = asyncio.get_event_loop()
-    
-    def _extract_info():
 
+    def _extract_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
             info = ydl.extract_info(src_url, download=False)
             if info is None:
                 return src_url, {}, {}
-            if "entries" in info and info["entries"]:
-                info = info["entries"][0]
+            # Handle playlist entries
+            entries = info.get("entries")
+            if entries:
+                info = entries[0]
             media_url = info.get("url") or src_url
 
             # Log selected format details for debugging
@@ -232,37 +229,38 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
 
                 # Show codec optimization results if debug logging enabled
                 if logger.isEnabledFor(logging.DEBUG):
-                    if "formats" in info and isinstance(info["formats"], list):
-                        matching_res = [f for f in info["formats"]
-                                      if f.get("height") == info.get("height")]
+                    formats = info.get("formats")
+                    if formats and isinstance(formats, list):
+                        matching_res = [f for f in formats if f.get("height") == info.get("height")]
                         if matching_res:
                             logger.debug(f"Alternative codecs at {info.get('height')}p:")
                             for f in matching_res[:3]:
                                 codec = f.get("vcodec", "unknown")
                                 logger.debug(f"  {f.get('format_id')}: {codec}")
 
-                        av1_available = any(f.get("vcodec", "").find("av01") >= 0
-                                          for f in info["formats"])
+                        av1_available = any(f.get("vcodec", "").find("av01") >= 0 for f in formats)
                         logger.debug(f"AV1 available: {av1_available}, Selected: {vcodec}")
 
             headers = {}
             rh = info.get("http_headers") or {}
-            if not rh and "formats" in info and isinstance(info["formats"], list):
-                for f in info["formats"]:
-                    if f.get("url") == media_url and f.get("http_headers"):
-                        rh = f["http_headers"]
-                        break
+            if not rh:
+                formats = info.get("formats")
+                if formats and isinstance(formats, list):
+                    for f in formats:
+                        if f.get("url") == media_url and f.get("http_headers"):
+                            rh = f["http_headers"]
+                            break
             if rh:
-                headers_str = headers_dict_to_ffmpeg_opt({k: v for k, v in rh.items()})
+                headers_str = headers_dict_to_ffmpeg_opt(dict(rh.items()))
                 if headers_str:
                     headers["headers"] = headers_str
             return media_url, headers, info
-    
+
     try:
         # Run in thread pool to avoid blocking the event loop
         return await loop.run_in_executor(None, _extract_info)  # type: ignore[return-value]
     except Exception as e:
-        logger = logging.getLogger('sources')
+        logger = logging.getLogger("sources")
         if isinstance(e, yt_dlp.DownloadError):  # type: ignore[attr-defined]
             # Re-raise DownloadError for proper handling upstream
             logger.warning(f"URL resolution failed for {src_url}: {e!r}")
@@ -276,7 +274,13 @@ async def resolve_stream_url_async(src_url: str, target_size: Tuple[int, int], h
 class MediaSource:
     """Represents a resolved media source."""
 
-    def __init__(self, original_url: str, resolved_url: str, options: Optional[Dict[str, str]] = None, info: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        original_url: str,
+        resolved_url: str,
+        options: dict[str, str] | None = None,
+        info: dict[str, Any] | None = None,
+    ):
         self.original_url = original_url
         self.resolved_url = resolved_url
         self.options = options or {}
@@ -305,17 +309,17 @@ class MediaSource:
             return False
 
         config = Config()
-        if not config.get('youtube.cache.enabled'):
+        if not config.get("youtube.cache.enabled"):
             return False
 
         if not loop:
             return False
 
-        filesize = self.info.get('filesize') or self.info.get('filesize_approx')
+        filesize = self.info.get("filesize") or self.info.get("filesize_approx")
         if not filesize:
             return False
 
-        max_size = config.get('youtube.cache.max_size')
+        max_size = config.get("youtube.cache.max_size")
         return filesize < max_size
 
 

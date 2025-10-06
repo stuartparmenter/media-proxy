@@ -78,6 +78,10 @@ ignore = [
     "E501",   # Line too long (handled by formatter)
     "S101",   # Use of assert (common in tests and validation)
     "S311",   # Random for crypto (not always applicable)
+    "S104",   # Binding to 0.0.0.0 - expected for server applications
+    "SIM102", # Nested if - sometimes clearer than combined
+    "SIM116", # Dict lookup vs if-else - readability vs performance tradeoff
+    "RUF046", # Unnecessary cast to int - false positives with math.ceil() and round()
 ]
 
 # Allow autofix for all enabled rules

@@ -3,21 +3,28 @@
 
 """Output protocol implementations for different streaming formats."""
 
-from .protocol import (
-    OutputProtocol, BufferedOutputProtocol,
-    OutputTarget, FrameMetadata, OutputMetrics, OutputProtocolFactory
-)
-
 # Import specific implementations to register them
 from .ddp import DDPOutput
+from .protocol import (
+    BufferedOutputProtocol,
+    FrameMetadata,
+    OutputMetrics,
+    OutputProtocol,
+    OutputProtocolFactory,
+    OutputTarget,
+)
+
 
 __all__ = [
+    "BufferedOutputProtocol",
+    # Implementations
+    "DDPOutput",
+    "FrameMetadata",
+    "OutputMetrics",
     # Base protocols
-    "OutputProtocol", "BufferedOutputProtocol",
-    # Data structures
-    "OutputTarget", "FrameMetadata", "OutputMetrics",
+    "OutputProtocol",
     # Factory
     "OutputProtocolFactory",
-    # Implementations
-    "DDPOutput"
+    # Data structures
+    "OutputTarget",
 ]

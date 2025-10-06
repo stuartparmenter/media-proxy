@@ -7,13 +7,15 @@ Usage: python run.py [options]
 """
 
 import sys
-import os
+from pathlib import Path
+
 
 # Add parent directory to path so we can import src as a package
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, parent_dir)
+parent_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(parent_dir))
 
 if __name__ == "__main__":
     # Import and run the main function from the package
     from src.main import run  # type: ignore[import-untyped]
+
     run()

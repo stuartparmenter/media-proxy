@@ -9,11 +9,8 @@ This module handles streaming operations including:
 - Output protocol coordination
 """
 
-from .options import StreamOptions
 from .core import create_streaming_task, stream_frames
+from .options import StreamOptions
 
-__all__ = [
-    "StreamOptions",
-    "create_streaming_task",
-    "stream_frames"
-]
+
+__all__ = ["StreamOptions", "create_streaming_task", "stream_frames"]

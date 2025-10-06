@@ -5,22 +5,20 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import Dict, Any
+from typing import Any
 
 from aiohttp import WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 
-from .protocol import ControlProtocol, ControlSession
 from ..streaming import create_streaming_task
+from .protocol import ControlProtocol, ControlSession
 
 
 def is_benign_disconnect(exc: BaseException) -> bool:
     """Check if an exception represents a benign disconnection."""
     if isinstance(exc, OSError) and getattr(exc, "winerror", None) in (64, 121):
         return True
-    if isinstance(exc, ConnectionResetError):
-        return True
-    return False
+    return bool(isinstance(exc, ConnectionResetError))
 
 
 class WebSocketControlProtocol(ControlProtocol):
@@ -29,9 +27,9 @@ class WebSocketControlProtocol(ControlProtocol):
     def __init__(self):
         super().__init__()
 
-    async def send_response(self, session: ControlSession, response: Dict[str, Any]) -> bool:
+    async def send_response(self, session: ControlSession, response: dict[str, Any]) -> bool:
         """Send a response back to the WebSocket client."""
-        ws = getattr(session, 'websocket', None)
+        ws = getattr(session, "websocket", None)
         if not ws or ws.closed:
             return False
 
@@ -43,13 +41,9 @@ class WebSocketControlProtocol(ControlProtocol):
 
     async def send_error(self, session: ControlSession, code: str, message: str) -> bool:
         """Send an error response to the WebSocket client."""
-        return await self.send_response(session, {
-            "type": "error",
-            "code": code,
-            "message": message
-        })
+        return await self.send_response(session, {"type": "error", "code": code, "message": message})
 
-    def _create_stream_task(self, session: ControlSession, params: Dict[str, Any]) -> asyncio.Task:
+    def _create_stream_task(self, session: ControlSession, params: dict[str, Any]) -> asyncio.Task:
         """Create and start a new streaming task."""
         return create_streaming_task(session, params)
 
@@ -61,7 +55,7 @@ class WebSocketControlProtocol(ControlProtocol):
             client_id=f"ws-{id(ws)}",
             client_ip=remote_addr if remote_addr else "unknown",
             websocket=ws,
-            server_host=request.host
+            server_host=request.host,
         )
 
         try:
@@ -70,17 +64,17 @@ class WebSocketControlProtocol(ControlProtocol):
             if not hello_successful:
                 return
 
-            logging.getLogger('websocket').info(f"hello from {session.client_ip} dev={session.device_id}")
+            logging.getLogger("websocket").info(f"hello from {session.client_ip} dev={session.device_id}")
 
             # Message loop
             await self._handle_message_loop(session)
 
         except Exception as exc:
             if is_benign_disconnect(exc):
-                reason = str(exc) if exc.args else ''
-                logging.getLogger('websocket').info(f"disconnect {session.client_ip} ({type(exc).__name__}: {reason})")
+                reason = str(exc) if exc.args else ""
+                logging.getLogger("websocket").info(f"disconnect {session.client_ip} ({type(exc).__name__}: {reason})")
             else:
-                logging.getLogger('websocket').warning(f"websocket error from {session.client_ip}: {exc!r}")
+                logging.getLogger("websocket").warning(f"websocket error from {session.client_ip}: {exc!r}")
         finally:
             # Clean up all streams
             await self.cleanup_session(session)
@@ -113,22 +107,21 @@ class WebSocketControlProtocol(ControlProtocol):
         session.device_id = hello.get("device_id", "unknown")
         self.sessions[session.client_id] = session
 
-        await self.send_response(session, {
-            "type": "hello_ack",
-            "server_version": "media-proxy/1.0"
-        })
+        await self.send_response(session, {"type": "hello_ack", "server_version": "media-proxy/1.0"})
         return True
 
     async def _handle_message_loop(self, session: ControlSession) -> None:
         """Handle incoming messages from the WebSocket."""
         ws = session.websocket
 
-        logging.getLogger('websocket').debug(f"starting message loop for {session.client_ip}, ws.closed={ws.closed}")
+        logging.getLogger("websocket").debug(f"starting message loop for {session.client_ip}, ws.closed={ws.closed}")
 
         # Use aiohttp's built-in message iteration with receive_timeout for connection drops
         try:
             async for msg in ws:
-                logging.getLogger('websocket').debug(f"received {msg.type} from {session.client_ip}, ws.closed={ws.closed}")
+                logging.getLogger("websocket").debug(
+                    f"received {msg.type} from {session.client_ip}, ws.closed={ws.closed}"
+                )
 
                 if msg.type == WSMsgType.TEXT:
                     try:
@@ -152,46 +145,52 @@ class WebSocketControlProtocol(ControlProtocol):
                         await self.send_error(session, "server_error", str(e))
 
                 elif msg.type == WSMsgType.ERROR:
-                    logging.getLogger('websocket').warning(f'WebSocket error: {ws.exception()}')
+                    logging.getLogger("websocket").warning(f"WebSocket error: {ws.exception()}")
                     break
                 elif msg.type == WSMsgType.CLOSE:
-                    logging.getLogger('websocket').info(f'WebSocket CLOSE received from {session.client_ip}')
+                    logging.getLogger("websocket").info(f"WebSocket CLOSE received from {session.client_ip}")
                     break
                 elif msg.type == WSMsgType.CLOSED:
-                    logging.getLogger('websocket').info(f'WebSocket CLOSED detected for {session.client_ip}')
+                    logging.getLogger("websocket").info(f"WebSocket CLOSED detected for {session.client_ip}")
                     break
                 elif msg.type == WSMsgType.PING:
-                    logging.getLogger('websocket').debug(f'PING received from {session.client_ip}')
+                    logging.getLogger("websocket").debug(f"PING received from {session.client_ip}")
                 elif msg.type == WSMsgType.PONG:
-                    logging.getLogger('websocket').debug(f'PONG received from {session.client_ip}')
+                    logging.getLogger("websocket").debug(f"PONG received from {session.client_ip}")
                 else:
-                    logging.getLogger('websocket').warning(f'Unknown WebSocket message type: {msg.type} from {session.client_ip}')
+                    logging.getLogger("websocket").warning(
+                        f"Unknown WebSocket message type: {msg.type} from {session.client_ip}"
+                    )
 
         except asyncio.TimeoutError:
-            logging.getLogger('websocket').info(f'WebSocket receive timeout (20s) for {session.client_ip} - connection likely dropped')
+            logging.getLogger("websocket").info(
+                f"WebSocket receive timeout (20s) for {session.client_ip} - connection likely dropped"
+            )
             # Close the WebSocket to clean up resources
             if not ws.closed:
                 await ws.close()
         except Exception as e:
             if is_benign_disconnect(e):
-                logging.getLogger('websocket').info(f'WebSocket disconnect for {session.client_ip}: {e}')
+                logging.getLogger("websocket").info(f"WebSocket disconnect for {session.client_ip}: {e}")
             else:
-                logging.getLogger('websocket').warning(f'WebSocket error for {session.client_ip}: {e}')
+                logging.getLogger("websocket").warning(f"WebSocket error for {session.client_ip}: {e}")
 
-        logging.getLogger('websocket').info(f"message loop exited for {session.client_ip}, ws.closed={ws.closed}")
+        logging.getLogger("websocket").info(f"message loop exited for {session.client_ip}, ws.closed={ws.closed}")
 
 
 async def websocket_handler(request):
     """Handle WebSocket upgrade requests."""
     ws = WebSocketResponse(
-        heartbeat=20.0,      # Send ping every 20 seconds (match websockets library)
-        receive_timeout=20.0, # Timeout if no message in 20 seconds (match websockets library)
-        autoping=True,       # Auto-respond to client pings with pongs
+        heartbeat=20.0,  # Send ping every 20 seconds (match websockets library)
+        receive_timeout=20.0,  # Timeout if no message in 20 seconds (match websockets library)
+        autoping=True,  # Auto-respond to client pings with pongs
     )
     await ws.prepare(request)
 
     remote_addr = request.remote or "unknown"
-    logging.getLogger('websocket').info(f"WebSocket connection established from {remote_addr}, heartbeat=20s, receive_timeout=20s")
+    logging.getLogger("websocket").info(
+        f"WebSocket connection established from {remote_addr}, heartbeat=20s, receive_timeout=20s"
+    )
 
     protocol = WebSocketControlProtocol()
     await protocol.handle_websocket(ws, request)
