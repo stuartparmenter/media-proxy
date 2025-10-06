@@ -23,13 +23,14 @@ DDP_MAX_DATA = 1440
 # DDP header layout (big-endian):
 #   flags: 0x40 => header present, 0x01 => PUSH (end-of-frame)
 #   seq:   0..255 sequence number (low 8 bits used)
-#   cfg:   pixel config; 0x2C = RGB888 (per 3waylabs DDP spec)
+#   cfg:   pixel config (data type field per DDP spec byte 2)
+#          RGB888: 0x0B (bits C=0, R=0, TTT=001[RGB], SSS=011[8-bit])
 #          EXT: 0x61 = RGB565(BE), 0x62 = RGB565(LE)
 #   out_id: destination output/canvas id (0..255)
 #   offset: byte offset within the frame buffer
 #   length: payload bytes in this packet
 DDP_HDR = struct.Struct("!BBB B I H")  # flags, seq, cfg, out_id, offset, length (network byte order)
-DDP_PIXEL_CFG_RGB888 = 0x2C
+DDP_PIXEL_CFG_RGB888 = 0x0B
 DDP_PIXEL_CFG_RGB565_BE = 0x61
 DDP_PIXEL_CFG_RGB565_LE = 0x62
 
