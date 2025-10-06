@@ -8,10 +8,10 @@ Available as a Home Assistant add-on or standalone Python application.
 
 ## What you get
 
-- WebSocket control server (default `:8788`) that accepts `start_stream`, `stop_stream`, and `update` commands.  
-- Video decoding via PyAV/FFmpeg with auto-rebuilding filter graph (handles rotation, SAR/PAR, format changes).  
-- Smart fit modes (`cover`, `pad`, `auto`), optional TV→PC range expansion, and automatic black-bar crop.  
-- Image path using `imageio` for stills and animated GIFs.  
+- Unified HTTP/WebSocket server using **aiohttp** (default port `8788`) with WebSocket control API and REST endpoints.
+- Video decoding via PyAV/FFmpeg with auto-rebuilding filter graph (handles rotation, SAR/PAR, format changes).
+- Smart fit modes (`cover`, `pad`, `auto`), optional TV→PC range expansion, and automatic black-bar crop.
+- Image processing via **Pillow** for stills, animated GIFs, PNGs (APNG), and WebP with frame caching.
 - UDP DDP sender with optional packet spreading and pacing for smoother delivery.  
 
 ---
@@ -311,9 +311,9 @@ ws.onmessage = (event) => {
 
 ---
 
-## Convert API
+## HTTP REST API
 
-Media Proxy includes a utility API for converting video/animated content into ESPHome LVGL animimg format.
+Media Proxy provides HTTP REST endpoints for media conversion and placeholder image generation.
 
 ### POST `/api/convert/animimg`
 
@@ -361,6 +361,47 @@ curl -X POST http://localhost:8788/api/convert/animimg \
 ```
 
 The resulting ZIP file contains individual PNG frames and an ESPHome configuration template ready for integration with LVGL animimg widgets.
+
+### GET `/api/internal/placeholder/{spec}`
+
+Generate placeholder images on-the-fly for testing and development. Useful for validating stream configurations without external media sources.
+
+**URL patterns:**
+- `/api/internal/placeholder/64x64.png` - Gray square with dimensions as text
+- `/api/internal/placeholder/600x400/orange.png` - Orange background, auto-contrast text
+- `/api/internal/placeholder/600x400/ff0000/white.png` - Red background, white text
+- `/api/internal/placeholder/800.png?text=Hello+World` - Custom text
+
+**Parameters:**
+- **Size**: `{width}x{height}` or `{size}` for square (10-4096px)
+- **Background color** *(optional)*: CSS color name or hex (e.g., `orange`, `f00`, `ff0000`, `#00ff00`)
+- **Text color** *(optional)*: CSS color name or hex (auto-contrasted if not specified)
+- **Query param `text`** *(optional)*: Custom text (defaults to dimensions). Use `\n` for newlines.
+
+**Internal Protocol Shorthand:**
+
+For use with WebSocket `start_stream` commands, the `internal:` protocol provides a shorthand:
+
+```json
+{
+  "type": "start_stream",
+  "out": 1,
+  "w": 64,
+  "h": 64,
+  "src": "internal:placeholder/64x64.png"
+}
+```
+
+The `internal:` URL automatically resolves to `http://{server_host}/api/internal/placeholder/64x64.png` using the server's actual host and port.
+
+**Examples:**
+```bash
+# Generate 64x64 gray placeholder
+curl http://localhost:8788/api/internal/placeholder/64x64.png --output test.png
+
+# Orange background with custom text
+curl http://localhost:8788/api/internal/placeholder/600x400/orange.png?text=Test%20Image --output test.png
+```
 
 ---
 
