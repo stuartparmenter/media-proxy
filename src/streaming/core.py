@@ -160,10 +160,7 @@ def create_streaming_task(session, params: dict[str, Any]) -> asyncio.Task:
         params["src"] = rewrite_internal_url(src, session.server_host)
 
     # Create strongly typed streaming options from control parameters
-    stream_options = StreamOptions.from_control_params(params)
-
-    # Set network target from session
-    stream_options.target_ip = session.client_ip
+    stream_options = StreamOptions.from_control_params(params, session=session)
 
     # Log the streaming options
     stream_options.log_info(f"{session.client_ip} dev={session.device_id}")

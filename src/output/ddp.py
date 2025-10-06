@@ -7,7 +7,7 @@ import logging
 import socket
 import struct
 from collections.abc import Callable, Iterator
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from ..config import Config
 from ..media.processing import rgb888_to_565_bytes
@@ -135,15 +135,6 @@ class DDPOutput(BufferedOutputProtocol):
 
         # Packet counters for logging
         self._packets_enqueued = 0
-
-    # Stream management interface implementation
-    def get_stream_key(self, session, params: dict[str, Any]) -> tuple[str, int]:
-        """DDP conflicts on (target_ip, output_id)"""
-        # TODO: Add support for explicit target_ip parameter in future
-        # For now, use the client IP as the target (existing behavior)
-        target_ip = session.client_ip
-        output_id = int(params["out"])
-        return (target_ip, output_id)
 
     async def create_and_register_stream(
         self, stream_key: tuple[str, int], task_factory: Callable[[], asyncio.Task]

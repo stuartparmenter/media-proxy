@@ -140,6 +140,10 @@ class NetworkFields:
         "ddp_port", int, lambda x: 1 <= int(x) <= 65535, default_factory=lambda: 4048, description="DDP output port"
     )
 
+    DDP_HOST = FieldDef(
+        "ddp_host", str, validator=lambda x: len(str(x).strip()) > 0, description="Target host for DDP packets"
+    )
+
     OUT = FieldDef("out", int, lambda x: int(x) >= 0, description="Output ID")
 
 
@@ -181,6 +185,7 @@ class AllFields:
         "w",
         "h",
         "ddp_port",
+        "ddp_host",
         "src",
         "pace",
         "ema",
@@ -190,7 +195,7 @@ class AllFields:
         "fmt",
         "fit",
     }
-    APPLIED_FIELDS: ClassVar[set[str]] = {"src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit"}
+    APPLIED_FIELDS: ClassVar[set[str]] = {"src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit", "ddp_host"}
 
     @classmethod
     def validate_fields(cls, params: dict[str, Any], operation: str) -> None:

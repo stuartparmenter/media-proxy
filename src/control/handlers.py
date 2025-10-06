@@ -34,10 +34,11 @@ class DDPControlHandler(ControlHandler):
 
     @staticmethod
     def get_stream_key(session, params: dict[str, Any]) -> tuple[str, int]:
-        """Generate DDP stream key as (target_ip, output_id) tuple."""
-        # TODO: Add support for explicit target_ip parameter in future
-        # For now, use the client IP as the target (existing behavior)
-        target_ip = session.client_ip
+        """Generate DDP stream key as (target_ip, output_id) tuple.
+
+        Uses ddp_host parameter if provided, otherwise defaults to client IP.
+        """
+        target_ip = params.get("ddp_host", session.client_ip)
         output_id = int(params["out"])
         return (target_ip, output_id)
 

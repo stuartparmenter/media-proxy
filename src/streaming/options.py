@@ -58,7 +58,7 @@ class StreamOptions:
         return (self.width, self.height)
 
     @classmethod
-    def from_control_params(cls, params: dict[str, Any]) -> "StreamOptions":
+    def from_control_params(cls, params: dict[str, Any], session=None) -> "StreamOptions":
         """Create StreamOptions from control protocol parameters with validation and defaults."""
         config = Config()
 
@@ -68,6 +68,9 @@ class StreamOptions:
         height = int(params["h"])
         source = MediaFields.SOURCE.transform(str(params["src"]))
         ddp_port = int(params.get("ddp_port", 4048))
+
+        # Extract ddp_host (defaults to session client IP if not provided)
+        ddp_host = params.get("ddp_host") if "ddp_host" in params else (session.client_ip if session else None)
 
         # Extract optional parameters directly - ControlFields validation is sufficient
         stream_config_dict = {}
@@ -102,9 +105,16 @@ class StreamOptions:
             stream_config_dict["hw"] = resolved_hw_backend
             logging.getLogger("streaming").debug(f"Resolved hw=auto to hw={resolved_hw_backend}")
 
-        return cls(
+        # Create StreamOptions instance
+        stream_options = cls(
             output_id=output_id, width=width, height=height, source=source, ddp_port=ddp_port, **stream_config_dict
         )
+
+        # Set target_ip from extracted ddp_host
+        if ddp_host:
+            stream_options.target_ip = ddp_host
+
+        return stream_options
 
     def get_applied_params(self) -> dict[str, Any]:
         """Get parameters that were applied to the stream (for control protocol response)."""

@@ -236,6 +236,7 @@ Media Proxy provides a WebSocket control API on `/control` (default port `:8788`
 - `src`: Media source (file path, HTTP URL, or YouTube URL)
 
 **Optional parameters:**
+- `ddp_host`: Target hostname/IP for DDP packets (default: client's IP address)
 - `ddp_port`: DDP output port (default: 4048)
 - `fit`: Resize mode - `cover`, `pad`, or `auto` (default: `auto`)
   - `auto`: Smart fit - scales directly when aspect ratios match, adds padding when they don't (recommended)
