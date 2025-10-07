@@ -149,6 +149,11 @@ def build_yt_dlp_format(width: int, height: int, mode: str | None = None, video_
         components.append(f'b[vcodec~="{vcodec_regex}"][protocol=https]')  # Preferred codec, any resolution
         components.append("b[protocol=https]")  # Any combined stream (https only)
 
+    # Final fallbacks for any protocol (m3u8, dash, etc.) - for live streams or edge cases
+    components.append("bv*")  # Any video-only stream, any protocol
+    if not video_only:
+        components.append("b")  # Any combined stream, any protocol
+
     format_expr = "/".join(components)
 
     # Don't use format_sort - let the format selector handle priority via ordering
