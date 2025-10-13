@@ -18,9 +18,9 @@ Available as a Home Assistant add-on or standalone Python application.
 
 ## Requirements
 
-- Python 3.10+ with FFmpeg support
+- Python 3.12+ with FFmpeg support
 - Network access to your displays (UDP, typically port 4048)
-- Dependencies listed in `requirements.txt` and `constraints.txt`
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip for dependency management
 
 ---
 
@@ -39,27 +39,27 @@ Available as a Home Assistant add-on or standalone Python application.
 
 ### Standalone Python Application
 
-1. **Clone the repository:**
+#### Using uv (Recommended)
+
+1. **Install uv:**
+   ```bash
+   # macOS/Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+   # Windows
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+2. **Clone and setup:**
    ```bash
    git clone https://github.com/stuartparmenter/media-proxy.git
    cd media-proxy
+   uv sync
    ```
 
-2. **Create and activate virtual environment:**
+3. **Run the server:**
    ```bash
-   cd src
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt -c constraints.txt
-   ```
-
-4. **Run the server:**
-   ```bash
-   python run.py --host 0.0.0.0 --port 8788
+   uv run python src/run.py --host 0.0.0.0 --port 8788
    ```
 
 ---

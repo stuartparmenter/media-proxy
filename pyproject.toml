@@ -5,13 +5,37 @@
 name = "media-proxy"
 version = "0.4.0"
 description = "Media streaming server that converts video/image sources to DDP for LED displays"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
     {name = "Stuart Parmenter"}
 ]
+dependencies = [
+    "aiohttp>=3.8,<4",
+    "av>=15,<16",
+    "bdfparser>=2,<3",
+    "bbcode>=1.1,<2",
+    "filetype>=1.2,<2",
+    "numpy>=2,<3",
+    "pillow>=10,<13",
+    "imageio-ffmpeg>=0.6,<1",
+    "psutil>=5,<8",
+    "PyYAML>=6,<7",
+    "yt-dlp[default,curl-cffi]>=2025.9,<2026",
+    "uvloop>=0.21 ; platform_system!='Windows'",
+]
 
-# Dependencies are still in src/requirements.txt for now
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.13,<2",
+    "pyright>=1.1,<2",
+    "types-PyYAML>=6,<7",
+    "ruff>=0.9,<1",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [tool.mypy]
 # Package configuration
