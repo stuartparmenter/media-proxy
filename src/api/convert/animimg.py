@@ -59,10 +59,11 @@ async def handle_animimg_request(request) -> web.Response:
         )
 
     except ValueError as e:
-        return web.json_response({"error": f"Invalid parameter: {e}"}, status=400)
+        logging.getLogger("animimg").debug(f"Invalid parameter: {e}")
+        return web.json_response({"error": "Invalid parameter value"}, status=400)
     except Exception as e:
         logging.getLogger("animimg").error(f"Error processing animimg request: {e}", exc_info=True)
-        return web.json_response({"error": f"Processing failed: {e}"}, status=500)
+        return web.json_response({"error": "Processing failed"}, status=500)
 
 
 def create_minimal_stream_options(source: str, width: int, height: int, fit: str) -> StreamOptions:

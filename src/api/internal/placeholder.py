@@ -108,7 +108,8 @@ async def handle_placeholder_request(request):
                 # Single number means square
                 width = height = int(parts[0])
         except (ValueError, OverflowError) as e:
-            return web.Response(status=400, text=f"Invalid dimensions: {e}")
+            logging.getLogger("placeholder").debug(f"Invalid dimensions: {e}")
+            return web.Response(status=400, text="Invalid dimensions format")
 
         # Validate dimensions (10-4096px)
         if not (10 <= width <= 4096 and 10 <= height <= 4096):
@@ -135,7 +136,8 @@ async def handle_placeholder_request(request):
         )
 
     except ValueError as e:
-        return web.Response(status=400, text=f"Invalid parameter: {e}")
+        logging.getLogger("placeholder").debug(f"Invalid parameter: {e}")
+        return web.Response(status=400, text="Invalid parameter value")
     except Exception as e:
         logging.getLogger("placeholder").error(f"Error generating placeholder: {e}", exc_info=True)
-        return web.Response(status=500, text=f"Internal error: {e}")
+        return web.Response(status=500, text="Internal server error")
