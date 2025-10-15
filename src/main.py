@@ -63,8 +63,18 @@ async def main():
     logger = logging.getLogger("main")
     logger.info(f"loaded config: {config.get()}")
 
-    # Setup uvloop if available (non-Windows)
-    if os.name != "nt":
+    # Setup high-performance event loop (uvloop/winloop)
+    if os.name == "nt":
+        # Windows: use winloop
+        try:
+            import winloop  # type: ignore[import-not-found]
+
+            asyncio.set_event_loop_policy(winloop.EventLoopPolicy())
+            logger.info("winloop enabled")
+        except ImportError:
+            logger.info("winloop not available, using default asyncio loop")
+    else:
+        # Non-Windows: use uvloop
         try:
             import uvloop  # type: ignore[import-not-found]
 
@@ -72,8 +82,6 @@ async def main():
             logger.info("uvloop enabled")
         except ImportError:
             logger.info("uvloop not available, using default asyncio loop")
-    else:
-        logger.info("using default asyncio loop on Windows")
 
     try:
         # Set Windows timer resolution for better timing accuracy
