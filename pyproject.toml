@@ -3,7 +3,7 @@
 
 [project]
 name = "media-proxy"
-version = "0.4.0"
+version = "0.5.7"
 description = "Media streaming server that converts video/image sources to DDP for LED displays"
 requires-python = ">=3.12"
 license = {text = "MIT"}
@@ -23,6 +23,7 @@ dependencies = [
     "PyYAML>=6,<7",
     "yt-dlp[default,curl-cffi]>=2025.9,<2026",
     "uvloop>=0.21 ; platform_system!='Windows'",
+    "winloop>=0.2.3 ; platform_system=='Windows'",
 ]
 
 [project.optional-dependencies]

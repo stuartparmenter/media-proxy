@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] - 2025-10-15
+
 ### Added
 - `internal:homeassistant` protocol for rendering Home Assistant entity states and templates to PNG
   - Entity mode: `internal:homeassistant/64x64.png?entity=sensor.name` (recommended)
@@ -27,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Third-party license documentation in `THIRD_PARTY_LICENSES.md` for bundled fonts
 
 ### Changed
+- Switch to uv for dependency management (from pip)
 - `internal:homeassistant` now uses Spleen 8x16 bitmap font by default (was PIL default font)
 - `internal:placeholder` now defaults to black background instead of gray (better for LED displays)
 - HEAD request optimization moved to top of handlers for maximum efficiency
