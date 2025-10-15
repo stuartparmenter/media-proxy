@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- winloop for improved async performance on Windows (~5x faster event loop vs default)
+
 ## [0.5.7] - 2025-10-15
 
 ### Added
