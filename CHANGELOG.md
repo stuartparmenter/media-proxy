@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - winloop for improved async performance on Windows (~5x faster event loop vs default)
+- Physical packet send tracking with microsecond-precision timing for accurate metrics during redundancy
+- Enhanced DDP metrics: physical PPS, redundancy multiplier, and separate jitter tracking for unique vs physical packets
+
+### Changed
+- Simplified still frame redundancy configuration to single `playback_still.redundancy` setting (replaces `burst`, `spacing_ms`, `tail_s`, `tail_hz`)
+- DDP still frame redundancy now sends duplicate packets immediately per DDP spec (no spacing delays)
+- Metrics RateMeters now self-manage via sliding window (no manual clearing, prevents memory leaks)
+- DDP metrics logging shows redundancy impact: `pps=45 (135phy, 3.0×)` when redundancy is active
+
+### Fixed
+- Fixed RateMeter memory leak from inconsistent clearing (only one of three meters was being cleared)
+- Fixed duplicate timestamp pollution in packet jitter calculations during redundant sends
+- Removed unused dead code: `last_frame_data`, `last_frame_seq`, `last_frame_was_still`
 
 ## [0.5.7] - 2025-10-15
 

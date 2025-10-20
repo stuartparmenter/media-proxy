@@ -117,10 +117,7 @@ net:
   spread_max_sleeps: 0
 
 playback_still:
-  burst: 3
-  spacing_ms: 100
-  tail_s: 2.0
-  tail_hz: 2
+  redundancy: 3  # Send each packet this many times for reliability
 ```
 
 ---

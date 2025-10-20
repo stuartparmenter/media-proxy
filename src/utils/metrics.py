@@ -55,11 +55,15 @@ class PerformanceTracker:
         self.last_log = time.perf_counter()
 
         self.frame_meter = RateMeter()
-        self.packet_meter = RateMeter()
+        self.packet_meter = RateMeter()  # Total packets (including duplicates from redundancy)
+        self.unique_packet_meter = RateMeter()  # Unique packets only (excluding duplicates)
+        self.physical_send_meter = RateMeter()  # Physical UDP sends with micro-offsets for duplicates
 
         # Counters
         self.frames_processed = 0
-        self.packets_sent = 0
+        self.packets_sent = 0  # Total packets (including duplicates)
+        self.unique_packets_sent = 0  # Unique packets only
+        self.physical_packets_sent = 0  # Physical UDP sends (tracked separately with timing)
         self.bytes_sent = 0
         self.queue_drops = 0
 
@@ -77,10 +81,26 @@ class PerformanceTracker:
         self.frames_processed += 1
 
     def record_packet(self) -> None:
-        """Record a packet being sent."""
+        """Record a packet being sent (including duplicates from redundancy)."""
         now = time.perf_counter()
         self.packet_meter.tick(now)
         self.packets_sent += 1
+
+    def record_unique_packet(self) -> None:
+        """Record a unique packet being sent (excluding duplicates from redundancy)."""
+        now = time.perf_counter()
+        self.unique_packet_meter.tick(now)
+        self.unique_packets_sent += 1
+
+    def record_physical_send(self, time_offset: float = 0.0) -> None:
+        """Record a physical UDP send with optional time offset for redundant packets.
+
+        Args:
+            time_offset: Microsecond offset to add (e.g., 0.000001 for 1μs) for duplicate packets
+        """
+        now = time.perf_counter() + time_offset
+        self.physical_send_meter.tick(now)
+        self.physical_packets_sent += 1
 
     def record_bytes(self, byte_count: int) -> None:
         """Record bytes sent."""
@@ -117,29 +137,41 @@ class PerformanceTracker:
     def get_metrics_and_reset(self) -> dict:
         """Get current metrics and reset counters."""
         fps = self.frame_meter.rate_hz()
-        pps = self.packet_meter.rate_hz()
+        pps = self.packet_meter.rate_hz()  # Total packets/sec (with duplicates)
+        unique_pps = self.unique_packet_meter.rate_hz()  # Unique packets/sec (no duplicates)
+        physical_pps = self.physical_send_meter.rate_hz()  # Physical UDP sends/sec
         frame_jitter = self.frame_meter.jitter_ms()
-        packet_jitter = self.packet_meter.jitter_ms()
+        packet_jitter = self.packet_meter.jitter_ms()  # Total packet jitter
+        unique_packet_jitter = self.unique_packet_meter.jitter_ms()  # Unique packet jitter
+        physical_packet_jitter = self.physical_send_meter.jitter_ms()  # Physical send jitter
 
         queue_avg = (sum(self.queue_samples) / len(self.queue_samples)) if self.queue_samples else 0
         queue_max = max(self.queue_samples) if self.queue_samples else 0
 
         metrics = {
             "fps": fps,
-            "pps": pps,
+            "pps": pps,  # Total (including duplicates from redundancy)
+            "unique_pps": unique_pps,  # Unique only
+            "physical_pps": physical_pps,  # Physical UDP sends with timing
             "frame_jitter_ms": frame_jitter,
-            "packet_jitter_ms": packet_jitter,
+            "packet_jitter_ms": packet_jitter,  # Total packet jitter
+            "unique_packet_jitter_ms": unique_packet_jitter,  # Unique packet jitter
+            "physical_packet_jitter_ms": physical_packet_jitter,  # Physical send jitter
             "frames_processed": self.frames_processed,
-            "packets_sent": self.packets_sent,
+            "packets_sent": self.packets_sent,  # Total (including duplicates)
+            "unique_packets_sent": self.unique_packets_sent,  # Unique only
+            "physical_packets_sent": self.physical_packets_sent,  # Physical sends tracked
             "bytes_sent": self.bytes_sent,
             "queue_drops": self.queue_drops,
             "queue_avg": queue_avg,
             "queue_max": queue_max,
         }
 
-        # Reset counters
+        # Reset counters (RateMeters self-manage via sliding window, no need to clear)
         self.frames_processed = 0
         self.packets_sent = 0
+        self.unique_packets_sent = 0
+        self.physical_packets_sent = 0
         self.bytes_sent = 0
         self.queue_drops = 0
         self.queue_samples.clear()

@@ -60,11 +60,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
     },
     # Optional resend policy for single-frame (non-looping) stills over UDP.
+    # Each packet is sent 'redundancy' times immediately (per DDP spec).
     "playback_still": {
-        "burst": 3,
-        "spacing_ms": 100,
-        "tail_s": 2.0,
-        "tail_hz": 2,
+        "redundancy": 3,  # Send each packet this many times for reliability
     },
 }
 

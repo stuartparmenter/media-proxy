@@ -58,8 +58,12 @@ class DDPSender(asyncio.DatagramProtocol):
             self.packets_sent += 1
 
 
-def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str) -> Iterator[bytes]:
-    """Generate DDP packets for a frame."""
+def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str) -> Iterator[tuple[bytes, int]]:
+    """Generate DDP packets for a frame with incrementing sequence numbers.
+
+    Yields tuples of (packet_bytes, next_sequence_number).
+    Sequence numbers wrap in range 1-15 per DDP spec.
+    """
 
     if fmt == "rgb888":
         pixcfg = DDP_PIXEL_CFG_RGB888
@@ -79,6 +83,7 @@ def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str) ->
     off = 0
     push_mask = 0x01
     ddp_base_flags = 0x40  # header present (per DDP spec)
+    current_seq = seq
 
     while off < total:
         end = min(off + DDP_MAX_DATA, total)
@@ -88,9 +93,14 @@ def ddp_iter_packets(rgb_bytes: bytes, output_id: int, seq: int, *, fmt: str) ->
         payload_len = len(chunk)
 
         pkt = bytearray(DDP_HDR.size + payload_len)
-        DDP_HDR.pack_into(pkt, 0, flags, seq & 0xFF, pixcfg, output_id & 0xFF, off, payload_len)
+        DDP_HDR.pack_into(pkt, 0, flags, current_seq, pixcfg, output_id & 0xFF, off, payload_len)
         pkt[DDP_HDR.size :] = chunk.tobytes()
-        yield bytes(pkt)
+
+        # Increment sequence for next packet (wrap 1-15 per DDP spec)
+        next_seq = (current_seq % 15) + 1
+        yield (bytes(pkt), next_seq)
+
+        current_seq = next_seq
         off = end
 
 
@@ -107,7 +117,7 @@ class DDPOutput(BufferedOutputProtocol):
         self.sender: DDPSender  # Initialized in start()
         self.transport: asyncio.DatagramTransport | None = None
         self.socket: socket.socket | None = None
-        self.seq = 0
+        self.seq = 1  # DDP spec: sequence 1-15 (0 = not used)
 
         # Performance tracking and logging configuration from app config
         app_config = Config()
@@ -121,11 +131,8 @@ class DDPOutput(BufferedOutputProtocol):
         self.spread_enabled = bool(app_config.get("net.spread_packets"))
         self.spread_max_fps = int(app_config.get("net.spread_max_fps"))
 
-        # Still frame resend configuration
-        self.still_resend_config = app_config.get("playback_still")
-        self.last_frame_data: bytes | None = None
-        self.last_frame_seq: int | None = None
-        self.last_frame_was_still = False
+        # Still frame redundancy configuration
+        self.still_redundancy = app_config.get("playback_still.redundancy")
 
         # Mode and pacing information for logging
         self.mode = "pace" if stream_options.pace > 0 else "native"
@@ -293,7 +300,7 @@ class DDPOutput(BufferedOutputProtocol):
                 pkt_count = (payload_len + DDP_MAX_DATA - 1) // DDP_MAX_DATA
                 spacing_s, group_n = compute_spacing_and_group(pkt_count, metadata.delay_ms / 1000.0)
 
-        # Send packets with optional spreading
+        # Send packets with optional spreading and redundancy (updates self.seq internally)
         await self._send_frame_packets(frame_data, metadata, spacing_s=spacing_s, group_n=group_n)
 
         # Update tracking
@@ -302,17 +309,8 @@ class DDPOutput(BufferedOutputProtocol):
         # Track delay for target FPS calculation
         self.last_delay_ms = metadata.delay_ms
 
-        # Cache for potential still resends
-        if metadata.is_still or metadata.is_last_frame:
-            self.last_frame_data = frame_data
-            self.last_frame_seq = self.seq
-            self.last_frame_was_still = metadata.is_still
-
-        self.seq = (self.seq + 1) & 0xFF
-
-        # Handle still frame resends
-        if metadata.is_still and metadata.is_last_frame:
-            await self._handle_still_resends(frame_data)
+        # Note: self.seq is already updated by _send_frame_packets()
+        # Note: redundancy for still frames is handled inside _send_frame_packets()
 
         # Log metrics if needed
         # For single-frame/still content, log once per frame since they're rare
@@ -327,101 +325,63 @@ class DDPOutput(BufferedOutputProtocol):
     async def _send_frame_packets(
         self, frame_data: bytes, metadata: FrameMetadata, *, spacing_s: float | None = None, group_n: int = 1
     ) -> None:
-        """Send all packets for a frame with optional spreading."""
+        """Send all packets for a frame with optional spreading and redundancy.
+
+        For still frames, each packet is sent 'redundancy' times immediately
+        before moving to the next packet (per DDP spec: duplicate packets for redundancy).
+        """
         if not self.sender:
             return
 
         addr = (self.target.host, self.target.port)
-        packets = list(ddp_iter_packets(frame_data, self.target.output_id, self.seq, fmt=self.pixel_format))
+
+        # Determine redundancy count for still frames
+        redundancy = 1  # Default: send each packet once
+        if metadata.is_still and metadata.is_last_frame:
+            redundancy = self.still_redundancy
+            if redundancy > 1:
+                logging.getLogger("ddp").info(f"out={self.target.output_id} still frame redundancy={redundancy}")
+
+        # Generate packets with incrementing sequences
+        packet_iter = ddp_iter_packets(frame_data, self.target.output_id, self.seq, fmt=self.pixel_format)
 
         if not spacing_s or spacing_s <= 0:
             # Send all packets immediately
-            for pkt in packets:
-                self.sender.sendto(pkt, addr)
-                self.tracker.record_packet()
-                self._packets_enqueued += 1
-            return
-
-        # Send with spreading
-        loop = asyncio.get_running_loop()
-        start_time = loop.time()
-        slot_idx = 0
-        group_left = group_n
-
-        for pkt in packets:
-            self.sender.sendto(pkt, addr)
-            self.tracker.record_packet()
-            self._packets_enqueued += 1
-
-            group_left -= 1
-            if group_left <= 0:
-                slot_idx += 1
-                target_time = start_time + slot_idx * spacing_s
-                sleep_time = max(0.0, target_time - loop.time())
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-                group_left = group_n
-
-    async def _handle_still_resends(self, frame_data: bytes) -> None:
-        """Handle resending of still frames for reliability."""
-        if not self.still_resend_config or not self.sender:
-            return
-
-        burst = int(self.still_resend_config.get("burst"))
-        spacing_ms = float(self.still_resend_config.get("spacing_ms"))
-        tail_s = float(self.still_resend_config.get("tail_s"))
-        tail_hz = int(self.still_resend_config.get("tail_hz"))
-
-        addr = (self.target.host, self.target.port)
-        seq = self.last_frame_seq or self.seq
-
-        # Burst phase
-        if burst > 0:
-            logging.getLogger("ddp").info(f"out={self.target.output_id} still resend burst={burst}")
-            for i in range(burst):
-                before_enq = self._packets_enqueued
-                packets = list(ddp_iter_packets(frame_data, self.target.output_id, seq, fmt=self.pixel_format))
-                for pkt in packets:
+            for pkt, next_seq in packet_iter:
+                # Send same packet 'redundancy' times before moving to next
+                for i in range(redundancy):
                     self.sender.sendto(pkt, addr)
-                    self.tracker.record_packet()
+                    self.tracker.record_packet()  # Count all physical sends
+                    self.tracker.record_physical_send(time_offset=i * 0.000001)  # Track with micro-offsets
                     self._packets_enqueued += 1
-
-                after_enq = self._packets_enqueued
-                logging.getLogger("ddp").debug(
-                    f"out={self.target.output_id} still-burst {i + 1}/{burst} enq+={after_enq - before_enq} q={self._queue.qsize()}/{self._queue.maxsize}"
-                )
-
-                if spacing_ms > 0 and i < burst - 1:
-                    await asyncio.sleep(spacing_ms / 1000.0)
-
-        # Tail phase
-        if tail_s > 0 and tail_hz > 0:
-            est = int(tail_s * tail_hz)
-            logging.getLogger("ddp").debug(
-                f"out={self.target.output_id} still resend tail={tail_s}s @ {tail_hz}Hz (~{est} sends)"
-            )
+                self.tracker.record_unique_packet()  # Count unique packet once
+                self.seq = next_seq
+        else:
+            # Send with spreading (apply spreading between unique packets, not duplicates)
             loop = asyncio.get_running_loop()
-            end_time = loop.time() + tail_s
-            tick = 1.0 / tail_hz
-            next_time = loop.time()
-            i = 0
+            start_time = loop.time()
+            slot_idx = 0
+            group_left = group_n
 
-            while loop.time() < end_time:
-                before_enq = self._packets_enqueued
-                packets = list(ddp_iter_packets(frame_data, self.target.output_id, seq, fmt=self.pixel_format))
-                for pkt in packets:
+            for pkt, next_seq in packet_iter:
+                # Send same packet 'redundancy' times with no delay between duplicates
+                for i in range(redundancy):
                     self.sender.sendto(pkt, addr)
-                    self.tracker.record_packet()
+                    self.tracker.record_packet()  # Count all physical sends
+                    self.tracker.record_physical_send(time_offset=i * 0.000001)  # Track with micro-offsets
                     self._packets_enqueued += 1
+                self.tracker.record_unique_packet()  # Count unique packet once
+                self.seq = next_seq
 
-                after_enq = self._packets_enqueued
-                logging.getLogger("ddp").debug(
-                    f"out={self.target.output_id} still-tail {i}/{est} enq+={after_enq - before_enq} q={self._queue.qsize()}/{self._queue.maxsize}"
-                )
-
-                await asyncio.sleep(max(0.0, next_time - loop.time()))
-                next_time += tick
-                i += 1
+                # Apply spreading delay only between unique packets
+                group_left -= 1
+                if group_left <= 0:
+                    slot_idx += 1
+                    target_time = start_time + slot_idx * spacing_s
+                    sleep_time = max(0.0, target_time - loop.time())
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
+                    group_left = group_n
 
     async def _log_metrics(self) -> None:
         """Log performance metrics."""
@@ -429,12 +389,23 @@ class DDPOutput(BufferedOutputProtocol):
 
         spread_tag = " (spread)" if self.spread_enabled else ""
 
+        # Format pps: show unique, with physical and redundancy multiplier if different
+        unique_pps = metrics["unique_pps"]
+        physical_pps = metrics["physical_pps"]
+        jitter_ms = metrics["unique_packet_jitter_ms"]  # Always use unique packet jitter
+
+        if abs(unique_pps - physical_pps) > 0.5:  # Redundancy is active
+            redundancy_factor = physical_pps / unique_pps if unique_pps > 0 else 1.0
+            pps_str = f"pps={unique_pps:.0f} ({physical_pps:.0f}phy, {redundancy_factor:.1f}x)"
+        else:
+            pps_str = f"pps={unique_pps:.0f}"
+
         if self.mode == "pace":
             # Paced mode logging
             logging.getLogger("ddp").info(
                 f"out={self.target.output_id} pace={self.pace_hz}Hz "
-                f"fps={metrics['fps']:.2f} pps={metrics['pps']:.0f} "
-                f"pkt_jit={metrics['packet_jitter_ms']:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
+                f"fps={metrics['fps']:.2f} {pps_str} "
+                f"pkt_jit={jitter_ms:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
                 f"q_avg={metrics['queue_avg']:.0f}/{self._queue.maxsize} "
                 f"q_max={metrics['queue_max']} "
                 f"enq={self._packets_enqueued} tx={self.sender.packets_sent if self.sender else 0} "
@@ -445,8 +416,8 @@ class DDPOutput(BufferedOutputProtocol):
             target_fps = 1000.0 / max(self.last_delay_ms or 33.33, 1.0)
             logging.getLogger("ddp").info(
                 f"out={self.target.output_id} native "
-                f"fps={metrics['fps']:.2f} (~{target_fps:.1f} tgt) pps={metrics['pps']:.0f} "
-                f"pkt_jit={metrics['packet_jitter_ms']:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
+                f"fps={metrics['fps']:.2f} (~{target_fps:.1f} tgt) {pps_str} "
+                f"pkt_jit={jitter_ms:.1f}ms frm_jit={metrics['frame_jitter_ms']:.1f}ms "
                 f"q_avg={metrics['queue_avg']:.0f}/{self._queue.maxsize} "
                 f"q_max={metrics['queue_max']} "
                 f"enq={self._packets_enqueued} tx={self.sender.packets_sent if self.sender else 0} "
