@@ -40,8 +40,6 @@ jobs:
         uv run mypy src/
 
     - name: Run pyright type checker
-      # TODO: Remove condition when pyright >1.1.406 is released with Python 3.14 stdlib support
-      if: matrix.python-version != '3.14'
       run: |
         uv run pyright src/
 
