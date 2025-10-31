@@ -3,6 +3,14 @@
 
 """Media handling modules for sources, video, images, and processing."""
 
+# Media-layer exceptions (clean abstraction from library-specific errors)
+from .exceptions import (
+    MediaDecodeError,
+    MediaFormatError,
+    MediaNetworkError,
+    MediaNotFoundError,
+    MediaSourceError,
+)
 from .images import PilFrameIterator
 from .processing import resize_pad_to_rgb_bytes, rgb888_to_565_bytes
 
@@ -13,16 +21,18 @@ from .video import PyAvFrameIterator
 
 
 __all__ = [
-    # Frame iteration (protocol-based)
     "FrameIterator",
     "FrameIteratorFactory",
+    "MediaDecodeError",
+    "MediaFormatError",
+    "MediaNetworkError",
+    "MediaNotFoundError",
     "MediaSource",
+    "MediaSourceError",
     "MediaUnavailableError",
     "PilFrameIterator",
     "PyAvFrameIterator",
-    # Processing
     "resize_pad_to_rgb_bytes",
-    # Sources
     "resolve_media_source",
     "rgb888_to_565_bytes",
 ]

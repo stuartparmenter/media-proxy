@@ -4,16 +4,22 @@
 import asyncio
 import contextlib
 import logging
-import urllib.error
+import random
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import unquote
 
-import av.error
 import yt_dlp
 
 from ..config import Config
+from ..media.exceptions import (
+    MediaDecodeError,
+    MediaFormatError,
+    MediaNetworkError,
+    MediaNotFoundError,
+    MediaSourceError,
+)
 from ..media.images import cleanup_active_image_sources
 from ..media.protocol import FrameIteratorFactory
 from ..media.sources import MediaUnavailableError, is_internal_url, resolve_media_source, rewrite_internal_url
@@ -139,52 +145,107 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[tuple[by
                 # Clean up executor (don't wait for daemon threads)
                 executor.shutdown(wait=False)
 
-        except urllib.error.HTTPError as e:
-            # HTTP errors from images.py - convert to MediaUnavailableError for consistent handling
-            raise MediaUnavailableError(f"HTTP {e.code}: {e.reason}", original_src, e) from e
-        except urllib.error.URLError as e:
-            # Network errors from images.py - convert to MediaUnavailableError for consistent handling
-            raise MediaUnavailableError(f"Network error: {e.reason}", original_src, e) from e
-        except (
-            av.error.HTTPError,
-            av.error.HTTPClientError,
-            av.error.HTTPServerError,
-            av.error.InvalidDataError,
-            av.error.ValueError,
-        ) as e:
-            # PyAV errors from video.py
-            errno_val = getattr(e, "errno", None)
-            if is_youtube_url(original_src):
-                # Log connection-specific diagnostics for YouTube streams
-                if errno_val == 5:
-                    logging.getLogger("streaming").warning(
-                        f"YouTube I/O error (errno 5 - connection lost): {e} - attempt {retry_count + 1}/{max_retries}"
-                    )
-                else:
-                    logging.getLogger("streaming").info(f"YouTube error detected (errno={errno_val}): {e}")
+        except MediaNetworkError as e:
+            # Network errors from video.py OR images.py
+            # These include HTTP errors, connection failures, I/O errors
+            error_code = e.error_code
 
-                # For YouTube URLs, these errors likely mean URL expiration or connection loss - trigger retry
+            if is_youtube_url(original_src):
+                # YouTube-specific retry logic with detailed logging
                 retry_count += 1
+
                 if retry_count > max_retries:
                     raise MediaUnavailableError(
-                        f"YouTube retry failed after {max_retries} attempts: {e}", original_src, e
+                        f"Network error after {max_retries} retries: {e}",
+                        original_src,
+                        e,
                     ) from e
-                logging.getLogger("streaming").info(
-                    f"YouTube URL issue (attempt {retry_count}/{max_retries}), re-resolving..."
-                )
-                await asyncio.sleep(0.5)
+
+                # Log retry attempt with context
+                if error_code == 5:
+                    logging.getLogger("streaming").warning(
+                        f"YouTube I/O error (errno 5 - connection lost): {e} - retry {retry_count}/{max_retries}"
+                    )
+                else:
+                    logging.getLogger("streaming").info(
+                        f"YouTube network error (code={error_code}): {e} - retry {retry_count}/{max_retries}"
+                    )
+
+                # Exponential backoff: 0.5s, 1s, 2s (capped at 5s) with jitter
+                delay = min(0.5 * (2 ** (retry_count - 1)), 5.0) + random.uniform(0, 0.05)
+                await asyncio.sleep(delay)
                 continue
             else:
-                # Non-YouTube errors - convert to MediaUnavailableError
-                raise MediaUnavailableError(f"Media error: {e}", original_src, e) from e
+                # Non-YouTube network errors - not retryable
+                raise MediaUnavailableError(
+                    f"Network error: {e}",
+                    original_src,
+                    e,
+                ) from e
+
+        except MediaFormatError as e:
+            # Permanent format issues - unsupported codec, invalid data
+            # Not retryable
+            raise MediaUnavailableError(
+                f"Format not supported: {e}",
+                original_src,
+                e,
+            ) from e
+
+        except MediaDecodeError as e:
+            # Decode failures during iteration
+            # Check if retryable (e.g., transient data corruption for YouTube)
+            if e.retryable and is_youtube_url(original_src):
+                retry_count += 1
+
+                if retry_count > max_retries:
+                    raise MediaUnavailableError(
+                        f"Decode error after {max_retries} retries: {e}",
+                        original_src,
+                        e,
+                    ) from e
+
+                logging.getLogger("streaming").info(f"Retryable decode error: {e} - retry {retry_count}/{max_retries}")
+                # Exponential backoff: 0.5s, 1s, 2s (capped at 5s) with jitter
+                delay = min(0.5 * (2 ** (retry_count - 1)), 5.0) + random.uniform(0, 0.05)
+                await asyncio.sleep(delay)
+                continue
+            else:
+                # Not retryable
+                raise MediaUnavailableError(
+                    f"Decode error: {e}",
+                    original_src,
+                    e,
+                ) from e
+
+        except MediaNotFoundError as e:
+            # File/resource not found - not retryable
+            raise MediaUnavailableError(
+                f"Media not found: {e}",
+                original_src,
+                e,
+            ) from e
+
+        except MediaSourceError as e:
+            # Unknown/unmapped error from media layer
+            # These are base MediaSourceError (not Network/Format/Decode subclasses)
+            # Don't retry - we don't know what the error is
+            raise MediaUnavailableError(
+                f"Unknown media error: {e}",
+                original_src,
+                e,
+            ) from e
+
         except FileNotFoundError as e:
             # File not found - re-raise with original source context
             raise FileNotFoundError(f"cannot open source: {original_src}") from e
+
         except RuntimeError:
-            # RuntimeErrors are not retryable
+            # RuntimeErrors are not retryable (should be rare now)
             raise
+
         except Exception as e:
-            # Other errors are not retryable
+            # Final catch-all for unexpected errors
             raise RuntimeError(f"Frame iteration error: {e}") from e
 
         if not stream_options.loop:

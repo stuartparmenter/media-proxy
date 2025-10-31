@@ -6,8 +6,6 @@ import contextlib
 import hashlib
 import logging
 import tempfile
-import urllib.error
-import urllib.request
 import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -18,10 +16,12 @@ from urllib.parse import urlparse
 
 import aiohttp
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
+from PIL.Image import DecompressionBombError
 
 from ..config import Config
 from ..utils.helpers import resolve_local_path
+from .exceptions import MediaDecodeError, MediaFormatError, MediaNetworkError, MediaNotFoundError
 from .processing import resize_pad_to_rgb_bytes
 from .protocol import FrameIterator
 
@@ -275,14 +275,44 @@ async def _create_image_source(src_url: str) -> ImageSource:
             temp_path = temp_file.name
         return TempFileSource(temp_path)
 
+    except aiohttp.ClientResponseError as e:
+        # HTTP response errors - extract status code
+        status = e.status
+        retryable = 500 <= status < 600  # 5xx errors are retryable
+
+        logging.getLogger("images").error(
+            f"HTTP error fetching image: status={status} url={src_url} message={e.message}"
+        )
+
+        raise MediaNetworkError(
+            f"HTTP {status}: {e.message}",
+            source_url=src_url,
+            error_code=status,
+            retryable=retryable,
+        ) from e
+
     except aiohttp.ClientError as e:
-        # Convert to URLError for compatibility with existing error handling
-        raise urllib.error.URLError(str(e)) from e
-    except FileNotFoundError:
-        # Re-raise file not found for upstream handling
-        raise
+        # Other client errors (connection, timeout, etc.)
+        logging.getLogger("images").error(
+            f"Network error fetching image: exception={type(e).__name__} url={src_url} message={e!s}"
+        )
+
+        raise MediaNetworkError(
+            f"Network error: {e}",
+            source_url=src_url,
+            retryable=True,
+        ) from e
+
+    except FileNotFoundError as e:
+        # Local file not found
+        logging.getLogger("images").error(f"Image file not found: url={src_url}")
+        raise MediaNotFoundError(f"Image file not found: {src_url}", source_url=src_url) from e
+
     except Exception as e:
-        raise RuntimeError(f"Failed to create image source: {e}") from e
+        logging.getLogger("images").error(
+            f"Failed to create image source: exception={type(e).__name__} url={src_url} message={e!s}"
+        )
+        raise MediaFormatError(f"Failed to create image source: {e}", source_url=src_url) from e
 
 
 def _get_display_name(src_url: str) -> str:
@@ -534,16 +564,50 @@ class PilFrameIterator(FrameIterator):
                     if not loop_video:
                         break
                     if not saw_frame:
-                        raise FileNotFoundError(f"cannot decode frames: {self.src_url}")
+                        raise MediaNotFoundError(
+                            f"No frames decoded from image: {self.src_url}", source_url=self.src_url
+                        )
             finally:
                 # Ensure PIL image is closed
                 pil_img.close()
 
+        except MediaNotFoundError:
+            # Re-raise media not found as-is
+            raise
+
+        except UnidentifiedImageError as e:
+            # PIL cannot identify image format
+            logging.getLogger("images").error(f"Unrecognized image format: url={self.src_url} message={e!s}")
+            raise MediaFormatError(
+                f"Unrecognized image format: {e}",
+                source_url=self.src_url,
+            ) from e
+
+        except DecompressionBombError as e:
+            # Image is too large (decompression bomb protection)
+            logging.getLogger("images").error(f"Image too large: url={self.src_url} message={e!s}")
+            raise MediaFormatError(
+                f"Image too large (decompression bomb): {e}",
+                source_url=self.src_url,
+            ) from e
+
         except Exception as e:
+            # Check for file-not-found-like errors
             msg = str(e).lower()
             if isinstance(e, FileNotFoundError) or "no such file" in msg or "not found" in msg:
-                raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
-            raise RuntimeError(f"PIL error: {e}") from e
+                logging.getLogger("images").error(f"Image file not found: url={self.src_url}")
+                raise MediaNotFoundError(f"Cannot open image source: {self.src_url}", source_url=self.src_url) from e
+
+            # Other PIL/image processing errors
+            logging.getLogger("images").error(
+                f"Image processing error: exception={type(e).__name__} url={self.src_url} message={e!s}"
+            )
+
+            raise MediaDecodeError(
+                f"Image processing error: {e}",
+                source_url=self.src_url,
+                retryable=False,
+            ) from e
         finally:
             self.cleanup()
 
