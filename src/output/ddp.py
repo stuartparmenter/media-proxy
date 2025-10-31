@@ -13,7 +13,7 @@ from ..config import Config
 from ..media.processing import rgb888_to_565_bytes
 from ..utils.helpers import compute_spacing_and_group
 from ..utils.metrics import PerformanceTracker
-from .protocol import BufferedOutputProtocol, FrameMetadata, OutputProtocol, OutputProtocolFactory, OutputTarget
+from .protocol import BufferedOutputProtocol, FrameMetadata, OutputProtocolFactory, OutputTarget
 
 
 # Max payload per DDP packet. 1440 keeps UDP datagrams < 1500B MTU
@@ -259,17 +259,11 @@ class DDPOutput(BufferedOutputProtocol):
 
     async def flush_and_stop(self) -> None:
         """Stop DDP output and wait for complete queue drain."""
-        # Stop the base protocol (sets _running = False)
-        await OutputProtocol.stop(self)
+        # FIRST: Wait for all queued items to be processed completely
+        await self._queue.join()
 
-        # Wait for worker task to complete naturally (includes all async operations)
-        if self._worker_task and not self._worker_task.done():
-            try:
-                await self._worker_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logging.getLogger("ddp").error(f"worker cleanup error: {e!r}")
+        # SECOND: Stop the buffered protocol (sets _running=False and cancels worker)
+        await super().stop()
 
         # DDP-specific cleanup
         if self.transport:
