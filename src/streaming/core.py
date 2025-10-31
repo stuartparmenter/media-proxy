@@ -6,6 +6,7 @@ import contextlib
 import logging
 import urllib.error
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import unquote
 
@@ -92,6 +93,10 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[tuple[by
             loop = asyncio.get_event_loop()
             iter_obj = iter(iterator)
 
+            # Create per-task executor for frame iteration
+            # Timeout on executor calls ensures we don't hang indefinitely on network/decoder issues
+            executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="frame_iter")
+
             def get_next_frame(it=iter_obj):
                 """Synchronous helper to get next frame from iterator."""
                 try:
@@ -101,25 +106,38 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[tuple[by
 
             frames_yielded = False
 
-            while True:
-                # Run synchronous next() in thread pool executor
-                result = await loop.run_in_executor(None, get_next_frame)
+            try:
+                while True:
+                    # Run synchronous next() in thread pool executor with timeout
+                    # Timeout prevents indefinite blocking on network issues or decoder hangs
+                    try:
+                        result = await asyncio.wait_for(loop.run_in_executor(executor, get_next_frame), timeout=30.0)
+                    except asyncio.TimeoutError:
+                        logging.getLogger("streaming").error(
+                            f"Frame iteration timeout (30s) for {original_src}, stopping stream"
+                        )
+                        break
 
-                if result is None:
-                    # Iterator exhausted
-                    break
+                    if result is None:
+                        # Iterator exhausted
+                        break
 
-                rgb888, delay_ms = result
+                    rgb888, delay_ms = result
 
-                # Reset retry count on first successful frame
-                if not frames_yielded:
-                    retry_count = 0
-                    frames_yielded = True
+                    # Reset retry count on first successful frame
+                    if not frames_yielded:
+                        retry_count = 0
+                        frames_yielded = True
 
-                yield rgb888, delay_ms
+                    yield rgb888, delay_ms
 
-            # Iterator exhausted
-            break
+                # Iterator exhausted - check if we should loop
+                if not stream_options.loop:
+                    break  # Exit outer loop if not looping
+                # Otherwise continue to create new iterator for next loop
+            finally:
+                # Clean up executor (don't wait for daemon threads)
+                executor.shutdown(wait=False)
 
         except urllib.error.HTTPError as e:
             # HTTP errors from images.py - convert to MediaUnavailableError for consistent handling

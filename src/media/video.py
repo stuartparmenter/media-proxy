@@ -623,6 +623,15 @@ class PyAvFrameIterator(FrameIterator):
                     # Not looping - exit after first iteration
                     break
 
+                # For non-cached streams, exit after one iteration
+                # and let streaming core create fresh iterator for each loop
+                if not self.stream_options.enable_cache:
+                    logging.getLogger("video").debug(
+                        "Non-cached stream exhausted after one iteration, "
+                        "returning to streaming core for fresh connection"
+                    )
+                    break
+
         except (HTTPError, HTTPClientError, HTTPServerError):
             # HTTP errors - re-raise for upstream handling (streaming layer will decide if retry needed)
             raise
