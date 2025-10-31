@@ -100,6 +100,25 @@ def sar_of(obj, vstream) -> tuple[int, int]:
     return (1, 1)
 
 
+def has_unreliable_pts(container) -> bool:
+    """Check if container format has synthetic/unreliable PTS timestamps.
+
+    Some streaming formats (like mpjpeg) provide PTS values that increment at
+    constant intervals but don't reflect actual frame arrival timing. This causes
+    burst behavior when frames arrive irregularly from the network.
+
+    Args:
+        container: PyAV container object
+
+    Returns:
+        True if the format is known to have unreliable PTS timing
+    """
+    format_name = container.format.name if container.format else ""
+    # MIME multipart JPEG (IP camera HTTP streams) and piped JPEG sequences
+    # typically have synthetic PTS that doesn't match real frame timing
+    return format_name in ("mpjpeg", "jpeg_pipe")
+
+
 def estimate_black_bars(
     frame_w: int, frame_h: int, gray: np.ndarray, thresh: int, min_px: int, max_ratio: float
 ) -> dict[str, int]:
@@ -154,6 +173,7 @@ class PyAvFrameIterator(FrameIterator):
         self.http_opts: dict[str, Any] = {}  # May be updated for YouTube URLs
         self._container = None  # Will be set by async_init if called
         self._vstream = None
+        self._unreliable_pts = False  # Will be set after container is opened
 
     async def async_init(self):
         """Async initialization to open stream without blocking event loop."""
@@ -170,6 +190,9 @@ class PyAvFrameIterator(FrameIterator):
         self._container, self._vstream = await loop.run_in_executor(
             None, open_stream, pyav_url, self.stream_options.hw, self.http_opts
         )
+
+        # Detect if this format has unreliable/synthetic PTS
+        self._unreliable_pts = has_unreliable_pts(self._container)
 
     @classmethod
     def can_handle(cls, src_url: str, content_type: str | None = None) -> bool:
@@ -286,12 +309,28 @@ class PyAvFrameIterator(FrameIterator):
             container = self._container
             vstream = self._vstream
 
+            # Detect if this format has unreliable/synthetic PTS
+            self._unreliable_pts = has_unreliable_pts(container)
+
             # Default frame delay if timestamps are missing
             avg_ms: float | None = None
             if vstream.average_rate:
                 fps = float(vstream.average_rate)
                 if fps > 0:
                     avg_ms = max(MIN_DELAY_MS, 1000.0 / fps)
+
+            if self._unreliable_pts:
+                format_name = container.format.name if container.format else "unknown"
+                if avg_ms is not None:
+                    logging.getLogger("video").info(
+                        f"Format {format_name} has unreliable PTS - using fixed interval ({avg_ms:.1f}ms)"
+                    )
+                else:
+                    # For streams without metadata, use MIN_DELAY_MS to output at natural arrival rate
+                    # (demuxer paces frames from network, don't add artificial delay)
+                    logging.getLogger("video").info(
+                        f"Format {format_name} has unreliable PTS - no average_rate, using natural timing ({MIN_DELAY_MS}ms)"
+                    )
 
             # Rebuildable filter graph state
             graph = None
@@ -325,7 +364,14 @@ class PyAvFrameIterator(FrameIterator):
 
                 old = g_props.copy()
                 g_props.update(
-                    {"w": w, "h": h, "fmt": fmt_name, "sar": (sar_n, sar_d), "rot": rot, "ac_applied": want_ac}
+                    {
+                        "w": w,
+                        "h": h,
+                        "fmt": fmt_name,
+                        "sar": (sar_n, sar_d),
+                        "rot": rot,
+                        "ac_applied": want_ac,
+                    }
                 )
                 logging.getLogger("video").debug(
                     f"rebuild: {old} -> {g_props} (ac={ac_crop if (ac_enabled and ac_decided) else 'pending'})"
@@ -542,25 +588,29 @@ class PyAvFrameIterator(FrameIterator):
                             rgb888 = of.to_ndarray(format="rgb24").tobytes()  # type: ignore[attr-defined]  # PyAV Frame.to_ndarray returns array-like with tobytes
                             frames_decoded += 1  # Increment frame counter
 
-                            # Compute inter-frame delay using PTS if available; otherwise avg_ms fallback
-                            delay_ms: float = float(avg_ms) if (avg_ms is not None) else 1000.0 / 10.0
-                            pts_s = None
-                            if of.pts is not None:
-                                tb_n, tb_d = tb_num_den(of.time_base or vstream.time_base)
-                                pts_s = float(of.pts) * (tb_n / tb_d)
-                            if pts_s is not None:
-                                if last_pts_s is None:
-                                    delay_ms = float(avg_ms) if (avg_ms is not None) else 33.33
-                                else:
-                                    delta_ms = (pts_s - last_pts_s) * 1000.0
-                                    if avg_ms is not None:
-                                        low = 0.75 * avg_ms
-                                        high = 1.25 * avg_ms
-                                        delta_ms = max(low, min(high, delta_ms))
-                                    elif delta_ms <= 0:
-                                        delta_ms = 33.33
-                                    delay_ms = max(MIN_DELAY_MS, float(delta_ms))
-                                last_pts_s = pts_s
+                            # For unreliable PTS formats (MJPEG), use fixed interval from avg_ms if available,
+                            # otherwise use MIN_DELAY_MS to output at natural network arrival rate
+                            delay_ms: float = float(avg_ms) if (avg_ms is not None) else MIN_DELAY_MS
+
+                            # Only use PTS-based timing for formats with reliable timestamps
+                            if not self._unreliable_pts:
+                                pts_s = None
+                                if of.pts is not None:
+                                    tb_n, tb_d = tb_num_den(of.time_base or vstream.time_base)
+                                    pts_s = float(of.pts) * (tb_n / tb_d)
+                                if pts_s is not None:
+                                    if last_pts_s is None:
+                                        delay_ms = float(avg_ms) if (avg_ms is not None) else 33.33
+                                    else:
+                                        delta_ms = (pts_s - last_pts_s) * 1000.0
+                                        if avg_ms is not None:
+                                            low = 0.75 * avg_ms
+                                            high = 1.25 * avg_ms
+                                            delta_ms = max(low, min(high, delta_ms))
+                                        elif delta_ms <= 0:
+                                            delta_ms = 33.33
+                                        delay_ms = max(MIN_DELAY_MS, float(delta_ms))
+                                    last_pts_s = pts_s
 
                             yield rgb888, float(delay_ms)
 
