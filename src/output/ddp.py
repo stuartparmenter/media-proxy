@@ -221,8 +221,7 @@ class DDPOutput(BufferedOutputProtocol):
 
     async def start(self) -> None:
         """Initialize UDP transport."""
-        await super().start()
-
+        # Initialize sender and transport BEFORE starting worker loop to prevent race condition
         loop = asyncio.get_running_loop()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -240,6 +239,8 @@ class DDPOutput(BufferedOutputProtocol):
         logging.getLogger("ddp").info(
             f"out={self.target.output_id} started output to {self.target.host}:{self.target.port}"
         )
+
+        await super().start()
 
     async def stop(self) -> None:
         """Clean up UDP transport."""
