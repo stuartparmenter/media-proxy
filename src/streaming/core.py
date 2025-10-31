@@ -86,9 +86,31 @@ async def stream_frames(stream_options: StreamOptions) -> AsyncIterator[tuple[by
                 http_opts=http_options,
             )
 
-            # Iterate frames - the iterator handles looping internally
+            # Iterate frames in executor to prevent blocking event loop
+            # The synchronous iterator (especially PyAV's container.demux()) can block for extended periods
+            # waiting for network I/O. Running in executor allows other async tasks to execute.
+            loop = asyncio.get_event_loop()
+            iter_obj = iter(iterator)
+
+            def get_next_frame(it=iter_obj):
+                """Synchronous helper to get next frame from iterator."""
+                try:
+                    return next(it)
+                except StopIteration:
+                    return None
+
             frames_yielded = False
-            for rgb888, delay_ms in iterator:
+
+            while True:
+                # Run synchronous next() in thread pool executor
+                result = await loop.run_in_executor(None, get_next_frame)
+
+                if result is None:
+                    # Iterator exhausted
+                    break
+
+                rgb888, delay_ms = result
+
                 # Reset retry count on first successful frame
                 if not frames_yielded:
                     retry_count = 0
