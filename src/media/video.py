@@ -10,12 +10,27 @@ from typing import Any
 import av
 import numpy as np
 from av.codec.hwaccel import HWAccel
-from av.error import FFmpegError, HTTPClientError, HTTPError, HTTPServerError
+from av.error import (
+    ConnectionRefusedError,
+    FFmpegError,
+    HTTPClientError,
+    HTTPError,
+    HTTPServerError,
+    InvalidDataError,
+    TimeoutError,
+)
 from av.filter import Graph as AvFilterGraph
 from av.video.frame import VideoFrame
 
 from ..config import Config
 from ..utils.helpers import resolve_local_path
+from .exceptions import (
+    MediaDecodeError,
+    MediaFormatError,
+    MediaNetworkError,
+    MediaNotFoundError,
+    MediaSourceError,
+)
 from .protocol import FrameIterator
 
 
@@ -32,22 +47,80 @@ def open_stream(src_url: str, hw_backend: str | None, options: dict[str, str] | 
 
     # For local files, check existence first to avoid misleading hwaccel errors
     if local_path and not Path(local_path).exists():
-        raise FileNotFoundError(f"cannot open media file: {src_url}")
+        raise MediaNotFoundError(f"Video file not found: {src_url}", source_url=src_url)
 
     try:
         hwaccel = HWAccel(device_type=hw_backend) if hw_backend else None
         container = av.open(pyav_url, mode="r", hwaccel=hwaccel, options=options)
         vstream = next((s for s in container.streams if s.type == "video"), None)
         if vstream is None:
-            raise RuntimeError("no video stream")
+            raise MediaFormatError("No video stream found in media file", source_url=src_url)
         return container, vstream
 
+    except InvalidDataError as e:
+        # FFmpeg invalid data error - corrupt or unsupported format
+        logger = logging.getLogger("video")
+        strerror = getattr(e, "strerror", str(e))
+        logger.error(
+            f"Failed to open video source: "
+            f"exception={type(e).__name__} "
+            f"strerror={strerror!r} "
+            f"url={src_url} "
+            f"hw={hw_backend} "
+            f"options={list(options.keys()) if options else 'none'}"
+        )
+        raise MediaFormatError(
+            f"Invalid or unsupported video format: {strerror}",
+            source_url=src_url,
+        ) from e
+    except (TimeoutError, ConnectionRefusedError) as e:
+        # Network connection errors (must come before OSError since they inherit from it)
+        logger = logging.getLogger("video")
+        strerror = getattr(e, "strerror", str(e))
+        errno_val = getattr(e, "errno", None)
+        logger.error(
+            f"Failed to open video source: "
+            f"exception={type(e).__name__} "
+            f"errno={errno_val} "
+            f"strerror={strerror!r} "
+            f"url={src_url} "
+            f"hw={hw_backend} "
+            f"options={list(options.keys()) if options else 'none'}"
+        )
+        raise MediaNetworkError(
+            f"Network error: {strerror}",
+            source_url=src_url,
+            error_code=errno_val,
+        ) from e
     except OSError as e:
         # Re-raise OS errors with original URL for better error messages
         raise OSError(f"cannot open media file: {src_url}") from e
     except FFmpegError as e:
-        # Re-raise FFmpeg errors with original URL
-        raise RuntimeError(f"FFmpeg error opening {src_url}: {e}") from e
+        # FFmpeg errors that PyAV couldn't categorize into specific types
+        # (includes UndefinedError and other unmapped error codes)
+        # Don't assume what type of error it is - raise generic MediaSourceError
+        logger = logging.getLogger("video")
+        errno_val = getattr(e, "errno", None)
+        strerror = getattr(e, "strerror", str(e))
+
+        # Log full diagnostic context
+        logger.error(
+            f"Failed to open video source: "
+            f"exception={type(e).__name__} "
+            f"errno={errno_val} "
+            f"strerror={strerror!r} "
+            f"url={src_url} "
+            f"hw={hw_backend} "
+            f"options={list(options.keys()) if options else 'none'}"
+        )
+
+        # Raise as unknown error - don't pretend to categorize
+        raise MediaSourceError(
+            f"Unknown FFmpeg error: {strerror}",
+            source_url=src_url,
+            error_code=errno_val,
+            retryable=False,
+        ) from e
 
 
 def rotation_from_stream_and_frame(vstream, frame) -> int:
@@ -617,7 +690,7 @@ class PyAvFrameIterator(FrameIterator):
                 # End of single iteration - check if we should loop
                 if not saw_frame:
                     # No frames decoded - likely end of stream or error
-                    raise RuntimeError(f"no frames decoded from source: {self.src_url}")
+                    raise MediaFormatError("No frames decoded from video source", source_url=self.src_url)
 
                 if not loop_video:
                     # Not looping - exit after first iteration
@@ -632,46 +705,183 @@ class PyAvFrameIterator(FrameIterator):
                     )
                     break
 
-        except (HTTPError, HTTPClientError, HTTPServerError):
-            # HTTP errors - re-raise for upstream handling (streaming layer will decide if retry needed)
-            raise
-        except FileNotFoundError as e:
-            # File not found - re-raise with clearer message
-            raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
-        except Exception as e:
-            # Check for file-not-found-like errors in the message
-            msg = str(e).lower()
-            if "no such file" in msg or "not found" in msg:
-                raise FileNotFoundError(f"cannot open source: {self.src_url}") from e
+        except (HTTPError, HTTPClientError, HTTPServerError) as e:
+            # HTTP errors - wrap as MediaNetworkError for consistent handling
+            errno_val = getattr(e, "errno", None)
+            logging.getLogger("video").error(
+                f"HTTP error during streaming: "
+                f"exception={type(e).__name__} "
+                f"errno={errno_val} "
+                f"url={self.src_url} "
+                f"frames_decoded={frames_decoded}"
+            )
+            raise MediaNetworkError(
+                f"HTTP error: {e}",
+                source_url=self.src_url,
+                error_code=errno_val,
+                retryable=True,
+            ) from e
 
-            # Enhanced error logging for I/O errors and other failures
+        except FileNotFoundError as e:
+            # File not found - wrap in MediaNotFoundError
+            logging.getLogger("video").error(f"Video file not found: url={self.src_url}")
+            raise MediaNotFoundError(f"Cannot open video source: {self.src_url}", source_url=self.src_url) from e
+
+        except InvalidDataError as e:
+            # FFmpeg invalid data error during decode - potentially retryable for YouTube
+            logger = logging.getLogger("video")
+            strerror = getattr(e, "strerror", str(e))
+
+            # Get codec information if available
+            try:
+                codec_name = (
+                    getattr(vstream.codec_context, "name", "unknown")
+                    if vstream and hasattr(vstream, "codec_context")
+                    else "unknown"
+                )
+            except Exception:
+                codec_name = "unknown"
+
+            logger.error(
+                f"Video decode error: "
+                f"exception={type(e).__name__} "
+                f"codec={codec_name} "
+                f"hw={self.stream_options.hw} "
+                f"frames_decoded={frames_decoded} "
+                f"url={self.src_url} "
+                f"message={strerror}"
+            )
+
+            raise MediaDecodeError(
+                f"Invalid video data: {strerror}",
+                source_url=self.src_url,
+                retryable=True,  # May be retryable for YouTube streams
+            ) from e
+
+        except (TimeoutError, ConnectionRefusedError) as e:
+            # Network errors during decode
+            logger = logging.getLogger("video")
+            strerror = getattr(e, "strerror", str(e))
             errno_val = getattr(e, "errno", None)
 
             # Get codec information if available
             try:
-                if vstream and hasattr(vstream, "codec_context"):
-                    codec_name = getattr(vstream.codec_context, "name", "unknown")
-                else:
-                    codec_name = "unknown"
+                codec_name = (
+                    getattr(vstream.codec_context, "name", "unknown")
+                    if vstream and hasattr(vstream, "codec_context")
+                    else "unknown"
+                )
             except Exception:
                 codec_name = "unknown"
 
-            # Special handling for I/O errors (errno 5)
-            if errno_val == 5 or "i/o error" in msg:
-                logging.getLogger("video").error(
-                    f"I/O error during decode: errno={errno_val} codec={codec_name} "
-                    f"hw={self.stream_options.hw} frames_decoded={frames_decoded} "
-                    f"http_opts={list(self.http_opts.keys()) if self.http_opts else 'none'}"
-                )
-            else:
-                # Log other errors with diagnostic context
-                logging.getLogger("video").error(
-                    f"Decode error: {type(e).__name__} errno={errno_val} codec={codec_name} "
-                    f"hw={self.stream_options.hw} frames_decoded={frames_decoded}"
-                )
+            logger.error(
+                f"Video decode error: "
+                f"exception={type(e).__name__} "
+                f"errno={errno_val} "
+                f"codec={codec_name} "
+                f"hw={self.stream_options.hw} "
+                f"frames_decoded={frames_decoded} "
+                f"url={self.src_url} "
+                f"message={strerror}"
+            )
 
-            # Re-raise all other errors for upstream handling
-            raise RuntimeError(f"av error: {e}") from e
+            raise MediaNetworkError(
+                f"Network error during decode: {strerror}",
+                source_url=self.src_url,
+                error_code=errno_val,
+                retryable=True,
+            ) from e
+
+        except FFmpegError as e:
+            # FFmpeg errors that PyAV couldn't categorize during decode
+            # (includes UndefinedError and other unmapped error codes)
+            # Don't assume what type of error it is - raise generic MediaSourceError
+            logger = logging.getLogger("video")
+            errno_val = getattr(e, "errno", None)
+            strerror = getattr(e, "strerror", str(e))
+
+            # Get codec information if available
+            try:
+                codec_name = (
+                    getattr(vstream.codec_context, "name", "unknown")
+                    if vstream and hasattr(vstream, "codec_context")
+                    else "unknown"
+                )
+            except Exception:
+                codec_name = "unknown"
+
+            logger.error(
+                f"Video decode error: "
+                f"exception={type(e).__name__} "
+                f"errno={errno_val} "
+                f"codec={codec_name} "
+                f"hw={self.stream_options.hw} "
+                f"frames_decoded={frames_decoded} "
+                f"url={self.src_url} "
+                f"message={strerror}"
+            )
+
+            # Raise as unknown error - don't pretend to categorize
+            raise MediaSourceError(
+                f"Unknown FFmpeg error: {strerror}",
+                source_url=self.src_url,
+                error_code=errno_val,
+                retryable=False,
+            ) from e
+
+        except Exception as e:
+            # Check for file-not-found-like errors in the message
+            msg = str(e).lower()
+            if "no such file" in msg or "not found" in msg:
+                logging.getLogger("video").error(f"Video file not found: url={self.src_url}")
+                raise MediaNotFoundError(f"Cannot open video source: {self.src_url}", source_url=self.src_url) from e
+
+            # Enhanced error logging for all other errors
+            logger = logging.getLogger("video")
+            errno_val = getattr(e, "errno", None)
+            exc_type = type(e).__name__
+            strerror = getattr(e, "strerror", str(e))
+
+            # Get codec information if available
+            try:
+                codec_name = (
+                    getattr(vstream.codec_context, "name", "unknown")
+                    if vstream and hasattr(vstream, "codec_context")
+                    else "unknown"
+                )
+            except Exception:
+                codec_name = "unknown"
+
+            # Log comprehensive diagnostic context
+            logger.error(
+                f"Video decode error: "
+                f"exception={exc_type} "
+                f"errno={errno_val} "
+                f"codec={codec_name} "
+                f"hw={self.stream_options.hw} "
+                f"frames_decoded={frames_decoded} "
+                f"url={self.src_url} "
+                f"http_opts={list(self.http_opts.keys()) if self.http_opts else 'none'} "
+                f"message={strerror}"
+            )
+
+            # Categorize based on error type
+            # I/O errors are network issues
+            if "i/o error" in msg:
+                raise MediaNetworkError(
+                    f"I/O error during decode: {strerror}",
+                    source_url=self.src_url,
+                    error_code=errno_val,
+                    retryable=True,
+                ) from e
+
+            # Other decode errors - not retryable by default
+            raise MediaDecodeError(
+                f"Decode error: {strerror}",
+                source_url=self.src_url,
+                error_code=errno_val,
+                retryable=False,
+            ) from e
         finally:
             # Always close container, even on errors
             if container:
