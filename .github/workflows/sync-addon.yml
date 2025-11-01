@@ -1,0 +1,51 @@
+name: Sync Add-on
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify-addon:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout media-proxy repo
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine bump type
+        id: bump
+        run: |
+          # Get current and previous tags
+          CURRENT="${{ github.event.release.tag_name }}"
+          PREVIOUS=$(git tag --sort=-version:refname | grep -v "$CURRENT" | head -n1)
+
+          # Strip 'v' prefix and split versions
+          CURR_VER="${CURRENT#v}"
+          PREV_VER="${PREVIOUS#v}"
+
+          IFS='.' read -ra CURR <<< "$CURR_VER"
+          IFS='.' read -ra PREV <<< "$PREV_VER"
+
+          # Compare major.minor.patch
+          if [[ ${CURR[0]} -gt ${PREV[0]} ]]; then
+            echo "type=major" >> $GITHUB_OUTPUT
+          elif [[ ${CURR[1]} -gt ${PREV[1]} ]]; then
+            echo "type=minor" >> $GITHUB_OUTPUT
+          else
+            echo "type=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send repository dispatch to addon
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: stuartparmenter/media-proxy-addon
+          event-type: app-release
+          client-payload: |
+            {
+              "version": "${{ github.event.release.tag_name }}",
+              "bump_type": "${{ steps.bump.outputs.type }}"
+            }
