@@ -3,7 +3,7 @@
 
 [project]
 name = "media-proxy"
-version = "0.5.8"
+version = "0.5.9"
 description = "Media streaming server that converts video/image sources to DDP for LED displays"
 requires-python = ">=3.12"
 license = {text = "MIT"}
