@@ -21,7 +21,8 @@ dependencies = [
     "imageio-ffmpeg>=0.6,<1",
     "psutil>=5,<8",
     "PyYAML>=6,<7",
-    "yt-dlp[default,curl-cffi]>=2025.9,<2026",
+    "yt-dlp[default,curl-cffi]>=2025.11.12,<2026",
+    "deno>=2.0.0",  # Deno binary for yt-dlp EJS (YouTube JS solver)
     "uvloop>=0.21 ; platform_system!='Windows'",
     "winloop>=0.2.3 ; platform_system=='Windows'",
 ]
@@ -48,7 +49,7 @@ files = ["src/"]
 packages = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["uvloop.*", "tomli.*", "yt_dlp.*", "bdfparser.*", "bbcode.*"]
+module = ["uvloop.*", "tomli.*", "yt_dlp.*", "bdfparser.*", "bbcode.*", "deno.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

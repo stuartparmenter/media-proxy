@@ -3,10 +3,21 @@
 
 import asyncio
 import logging
+import shutil
 from typing import Any
 from urllib.parse import unquote, urlparse, urlunparse
 
 import yt_dlp
+
+
+# Try to import deno package for finding the binary (local dev with PyPI deno)
+# Falls back to PATH lookup (Docker/system install)
+try:
+    import deno
+
+    _deno_bin: str | None = deno.find_deno_bin()
+except ImportError:
+    _deno_bin = shutil.which("deno")
 
 from ..config import Config
 from ..utils.helpers import headers_dict_to_ffmpeg_opt, is_youtube_url
@@ -199,13 +210,17 @@ async def resolve_stream_url_async(
     logger.info(f"YouTube format selection for {target_size[0]}x{target_size[1]}, hw={hw_mode}")
     logger.debug(f"Format expression: {format_expr}")
 
-    ydl_opts = {
+    ydl_opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "extract_flat": False,
         "format": format_expr,
     }
+
+    # Configure Deno path for EJS (YouTube JavaScript solver)
+    if _deno_bin:
+        ydl_opts["js_runtimes"] = {"deno": {"path": _deno_bin}}
 
     # Debug: List available formats if debug logging is enabled
     # Run the blocking yt-dlp operation in a thread pool
