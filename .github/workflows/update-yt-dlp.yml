@@ -30,6 +30,13 @@ jobs:
           YT_DLP_CURRENT=$(grep -A1 '^name = "yt-dlp"$' uv.lock | grep 'version' | sed 's/.*"\(.*\)"/\1/')
           YT_DLP_EJS_CURRENT=$(grep -A1 '^name = "yt-dlp-ejs"$' uv.lock | grep 'version' | sed 's/.*"\(.*\)"/\1/')
 
+          # Validate extracted versions
+          if [ -z "$YT_DLP_CURRENT" ] || [ -z "$YT_DLP_EJS_CURRENT" ]; then
+            echo "ERROR: Could not extract current versions from uv.lock"
+            echo "yt-dlp: '$YT_DLP_CURRENT', yt-dlp-ejs: '$YT_DLP_EJS_CURRENT'"
+            exit 1
+          fi
+
           echo "yt_dlp=$YT_DLP_CURRENT" >> $GITHUB_OUTPUT
           echo "yt_dlp_ejs=$YT_DLP_EJS_CURRENT" >> $GITHUB_OUTPUT
           echo "Current yt-dlp: $YT_DLP_CURRENT"
@@ -39,8 +46,18 @@ jobs:
         id: latest
         run: |
           # Get latest versions from PyPI JSON API
-          YT_DLP_LATEST=$(curl -s https://pypi.org/pypi/yt-dlp/json | jq -r '.info.version')
-          YT_DLP_EJS_LATEST=$(curl -s https://pypi.org/pypi/yt-dlp-ejs/json | jq -r '.info.version')
+          YT_DLP_LATEST=$(curl -sf https://pypi.org/pypi/yt-dlp/json | jq -r '.info.version')
+          YT_DLP_EJS_LATEST=$(curl -sf https://pypi.org/pypi/yt-dlp-ejs/json | jq -r '.info.version')
+
+          # Validate PyPI responses
+          if [ -z "$YT_DLP_LATEST" ] || [ "$YT_DLP_LATEST" = "null" ]; then
+            echo "ERROR: Could not fetch yt-dlp version from PyPI"
+            exit 1
+          fi
+          if [ -z "$YT_DLP_EJS_LATEST" ] || [ "$YT_DLP_EJS_LATEST" = "null" ]; then
+            echo "ERROR: Could not fetch yt-dlp-ejs version from PyPI"
+            exit 1
+          fi
 
           echo "yt_dlp=$YT_DLP_LATEST" >> $GITHUB_OUTPUT
           echo "yt_dlp_ejs=$YT_DLP_EJS_LATEST" >> $GITHUB_OUTPUT
