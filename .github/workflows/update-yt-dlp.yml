@@ -26,8 +26,9 @@ jobs:
         id: current
         run: |
           # Extract current versions from uv.lock
-          YT_DLP_CURRENT=$(grep -A1 '^\[\[package\]\]' uv.lock | grep -A1 'name = "yt-dlp"$' | grep 'version' | head -1 | sed 's/.*"\(.*\)"/\1/')
-          YT_DLP_EJS_CURRENT=$(grep -A1 '^\[\[package\]\]' uv.lock | grep -A1 'name = "yt-dlp-ejs"$' | grep 'version' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          # The lock file format has name and version on consecutive lines after [[package]]
+          YT_DLP_CURRENT=$(grep -A1 '^name = "yt-dlp"$' uv.lock | grep 'version' | sed 's/.*"\(.*\)"/\1/')
+          YT_DLP_EJS_CURRENT=$(grep -A1 '^name = "yt-dlp-ejs"$' uv.lock | grep 'version' | sed 's/.*"\(.*\)"/\1/')
 
           echo "yt_dlp=$YT_DLP_CURRENT" >> $GITHUB_OUTPUT
           echo "yt_dlp_ejs=$YT_DLP_EJS_CURRENT" >> $GITHUB_OUTPUT
