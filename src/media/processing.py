@@ -14,6 +14,7 @@ from ..config import Config
 # Module-level LUT caches for gamma correction
 _LINEAR_LUT: np.ndarray | None = None
 _SRGB_LUT: np.ndarray | None = None
+_LED_GAMMA_LUT: np.ndarray | None = None
 
 
 def convert_to_srgb(img: Image.Image) -> Image.Image:
@@ -81,13 +82,63 @@ def convert_to_srgb(img: Image.Image) -> Image.Image:
         return img
 
 
-def resize_pad_to_rgb_bytes(img: Image.Image, size: tuple[int, int], fit: str = "pad") -> bytes:
+def _build_led_gamma_lut() -> np.ndarray:
+    """Build LUT for inverse CIE1931 gamma compensation.
+
+    This LUT pre-compensates for LED displays that apply CIE1931 gamma correction.
+    Pipeline: sRGB input -> decode to linear -> inverse CIE1931 -> output 0-255
+
+    Returns:
+        256-entry uint8 LUT mapping sRGB input to compensated output
+    """
+    lut = np.zeros(256, dtype=np.uint8)
+    for i in range(256):
+        # Decode sRGB to linear (same formula as _to_linear_u8)
+        srgb = i / 255.0
+        linear = srgb / 12.92 if srgb <= 0.04045 else ((srgb + 0.055) / 1.055) ** 2.4
+
+        # Apply inverse CIE1931 to get lightness L* (0-100)
+        # This is the inverse of: Y = cie1931(L) where Y is linear luminance
+        lightness = linear * 902.3 if linear <= 0.008856 else 116.0 * (linear ** (1.0 / 3.0)) - 16.0
+
+        # Scale L* (0-100) to output (0-255)
+        out = lightness * 255.0 / 100.0
+        lut[i] = int(np.clip(out + 0.5, 0, 255))
+
+    return lut
+
+
+def apply_led_gamma(rgb_array: np.ndarray, mode: str) -> np.ndarray:
+    """Apply LED gamma compensation to RGB array.
+
+    Args:
+        rgb_array: RGB image array (H, W, 3) or flat RGB bytes reshaped
+        mode: Gamma mode - "none" or "cie1931"
+
+    Returns:
+        Compensated RGB array (same shape as input)
+    """
+    if mode == "none":
+        return rgb_array
+
+    global _LED_GAMMA_LUT
+    if _LED_GAMMA_LUT is None:
+        _LED_GAMMA_LUT = _build_led_gamma_lut()
+        logging.getLogger("processing").info("Built LED gamma compensation LUT (CIE1931)")
+
+    return _LED_GAMMA_LUT[rgb_array]
+
+
+def resize_pad_to_rgb_bytes(
+    img: Image.Image, size: tuple[int, int], fit: str = "pad", led_gamma: str = "none"
+) -> bytes:
     """Resize image to target size using specified fit mode, return RGB888 bytes.
 
     Args:
         img: PIL Image to resize
         size: Target (width, height) tuple
         fit: Fit mode - "pad", "cover", or "auto"
+        led_gamma: LED gamma compensation mode - "none" or "cie1931"
 
     For paletted images, preserves the palette through the resize operation
     to avoid quantization losses.
@@ -297,7 +348,12 @@ def resize_pad_to_rgb_bytes(img: Image.Image, size: tuple[int, int], fit: str = 
             canvas.paste(im, ((w - im.size[0]) // 2, (h - im.size[1]) // 2))
             im = canvas
 
-    return np.asarray(im, dtype=np.uint8).tobytes()
+    # Convert to array and apply LED gamma compensation if enabled
+    result = np.asarray(im, dtype=np.uint8)
+    if led_gamma != "none":
+        result = apply_led_gamma(result, led_gamma)
+
+    return result.tobytes()
 
 
 def rgb888_to_565_bytes(rgb_bytes: bytes, endian: str) -> bytes:

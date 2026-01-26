@@ -120,6 +120,14 @@ class MediaFields:
         description="FFmpeg color range expansion (0=never, 1=auto, 2=force)",
     )
 
+    LED_GAMMA = FieldDef(
+        "led_gamma",
+        str,
+        lambda x: str(x) in ("none", "cie1931"),
+        default_factory=lambda config: config.get("output.led_gamma"),
+        description="LED display gamma compensation mode",
+    )
+
 
 class ProcessingFields:
     """Fields related to output processing and frame manipulation."""
@@ -194,8 +202,20 @@ class AllFields:
         "hw",
         "fmt",
         "fit",
+        "led_gamma",
     }
-    APPLIED_FIELDS: ClassVar[set[str]] = {"src", "pace", "ema", "expand", "loop", "hw", "fmt", "fit", "ddp_host"}
+    APPLIED_FIELDS: ClassVar[set[str]] = {
+        "src",
+        "pace",
+        "ema",
+        "expand",
+        "loop",
+        "hw",
+        "fmt",
+        "fit",
+        "ddp_host",
+        "led_gamma",
+    }
 
     @classmethod
     def validate_fields(cls, params: dict[str, Any], operation: str) -> None:

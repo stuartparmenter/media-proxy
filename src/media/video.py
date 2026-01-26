@@ -508,12 +508,12 @@ class PyAvFrameIterator(FrameIterator):
                         t1.link_to(t2)
                         last = t2
 
-                # expand TV->PC range before final downscale if requested
+                # Range expansion: TV(16-235) → full(0-255)
                 expand_args = ""
                 if self.stream_options.expand == 2:
-                    expand_args = ":in_range=tv:out_range=pc"
+                    expand_args = ":in_range=tv:out_range=full"
                 elif self.stream_options.expand == 1:
-                    expand_args = ":in_range=auto:out_range=pc"
+                    expand_args = ":in_range=auto:out_range=full"
 
                 # Fit selection
                 fit_mode = self.stream_options.fit
@@ -567,9 +567,30 @@ class PyAvFrameIterator(FrameIterator):
                 n = g.add("setdar", args="1")
                 last.link_to(n)
                 last = n
+
+                # Convert to RGB24 - the scale filter above already set color matrix/range
                 n = g.add("format", args="rgb24")
                 last.link_to(n)
                 last = n
+
+                # LED gamma compensation filter (inverse CIE1931)
+                if self.stream_options.led_gamma == "cie1931":
+                    # FFmpeg expression: sRGB decode -> inverse CIE1931 -> scale to 0-255
+                    # lin = sRGB_to_linear(val/255)
+                    # L = inverse_cie1931(lin)  -- returns 0-100
+                    # out = clip(L * 255/100, 0, 255)
+                    led_expr = (
+                        "clip("
+                        "if(lte("
+                        "if(lte(val/255,0.04045),val/255/12.92,pow((val/255+0.055)/1.055,2.4)),"
+                        "0.008856),"
+                        "if(lte(val/255,0.04045),val/255/12.92,pow((val/255+0.055)/1.055,2.4))*902.3,"
+                        "116*pow(if(lte(val/255,0.04045),val/255/12.92,pow((val/255+0.055)/1.055,2.4)),1.0/3.0)-16"
+                        ")*255/100,0,255)"
+                    )
+                    n = g.add("lutrgb", args=f"r='{led_expr}':g='{led_expr}':b='{led_expr}'")
+                    last.link_to(n)
+                    last = n
 
                 sink = g.add("buffersink")
                 last.link_to(sink)

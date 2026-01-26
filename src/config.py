@@ -12,6 +12,11 @@ import yaml
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "hw": {"prefer": "auto"},
+    "output": {
+        # LED gamma compensation: "none" | "cie1931"
+        # Applies inverse CIE1931 curve to pre-compensate for LED display gamma
+        "led_gamma": "cie1931",
+    },
     "video": {
         "expand_mode": 2,  # 0=never, 1=auto(limited->full), 2=force
         "fit": "auto",  # "pad" | "cover" | "auto"

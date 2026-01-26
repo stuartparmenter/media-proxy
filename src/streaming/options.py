@@ -27,6 +27,7 @@ class StreamOptions:
     hw: str = field(metadata={"field_def": MediaFields.HARDWARE})
     fit: str = field(metadata={"field_def": MediaFields.FIT})
     fmt: str = field(metadata={"field_def": MediaFields.FORMAT})
+    led_gamma: str = field(metadata={"field_def": MediaFields.LED_GAMMA})
 
     # Processing options (no defaults)
     pace: int = field(metadata={"field_def": ProcessingFields.PACE})
@@ -76,7 +77,7 @@ class StreamOptions:
         stream_config_dict = {}
 
         # Control field names match StreamOptions field names - no mapping needed
-        optional_fields = ["loop", "expand", "hw", "pace", "ema", "fmt", "fit"]
+        optional_fields = ["loop", "expand", "hw", "pace", "ema", "fmt", "fit", "led_gamma"]
 
         for field_name in optional_fields:
             if field_name in params and params[field_name] is not None:
@@ -98,6 +99,8 @@ class StreamOptions:
             stream_config_dict["fmt"] = MediaFields.FORMAT.get_default()
         if "fit" not in stream_config_dict:
             stream_config_dict["fit"] = MediaFields.FIT.get_default(config)
+        if "led_gamma" not in stream_config_dict:
+            stream_config_dict["led_gamma"] = MediaFields.LED_GAMMA.get_default(config)
 
         # Resolve hardware backend for format optimization
         if stream_config_dict["hw"] == "auto":
@@ -127,14 +130,16 @@ class StreamOptions:
             "hw": self.hw,
             "fmt": self.fmt,
             "fit": self.fit,
+            "led_gamma": self.led_gamma,
         }
 
     def log_info(self, session_info: str) -> None:
         """Log streaming configuration info."""
         cache_str = f" cache={self.enable_cache}" if self.enable_cache else ""
+        gamma_str = f" led_gamma={self.led_gamma}" if self.led_gamma != "none" else ""
         logging.getLogger("streaming").info(
             f"start_stream {session_info} out={self.output_id} "
             f"size={self.width}x{self.height} ddp_port={self.ddp_port} src={self.source} "
             f"pace={self.pace} ema={self.ema} expand={self.expand} "
-            f"loop={self.loop} hw={self.hw} fmt={self.fmt} fit={self.fit}{cache_str}"
+            f"loop={self.loop} hw={self.hw} fmt={self.fmt} fit={self.fit}{gamma_str}{cache_str}"
         )
