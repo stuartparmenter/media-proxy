@@ -73,8 +73,9 @@ class FrameIteratorFactory:
         Returns:
             Content-Type string or None if detection fails
         """
-        from pathlib import Path
         from urllib.parse import urlparse
+
+        import anyio
 
         from ..utils.helpers import resolve_local_path
 
@@ -97,7 +98,7 @@ class FrameIteratorFactory:
         if scheme in ("file", ""):
             file_path = resolve_local_path(url)
             # If resolve_local_path returns None, check if url is a plain file path
-            if not file_path and Path(url).exists():
+            if not file_path and await anyio.Path(url).exists():
                 file_path = url
 
             if file_path:

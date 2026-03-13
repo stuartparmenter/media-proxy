@@ -25,6 +25,7 @@ dependencies = [
     "deno>=2.0.0",  # Deno binary for yt-dlp EJS (YouTube JS solver)
     "uvloop>=0.21 ; platform_system!='Windows'",
     "winloop>=0.2.3 ; platform_system=='Windows'",
+    "anyio>=4,<5",
 ]
 
 [project.optional-dependencies]
