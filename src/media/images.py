@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
+import anyio
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 from PIL.Image import DecompressionBombError
@@ -232,7 +233,7 @@ async def _create_image_source(src_url: str) -> ImageSource:
         local_path = resolve_local_path(src_url)
         if local_path:
             # Check file size limit
-            file_size = Path(local_path).stat().st_size
+            file_size = (await anyio.Path(local_path).stat()).st_size
             if file_size > MAX_SIZE_LIMIT:
                 raise ValueError(
                     f"Image too large: {_format_size_mb(file_size)} (max {_format_size_mb(MAX_SIZE_LIMIT)})"
