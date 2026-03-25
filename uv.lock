@@ -568,7 +568,6 @@ dependencies = [
     { name = "av" },
     { name = "bbcode" },
     { name = "bdfparser" },
-    { name = "deno" },
     { name = "filetype" },
     { name = "imageio-ffmpeg" },
     { name = "numpy" },
@@ -581,6 +580,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+deno = [
+    { name = "deno" },
+]
 dev = [
     { name = "mypy" },
     { name = "pyright" },
@@ -595,7 +597,7 @@ requires-dist = [
     { name = "av", specifier = ">=15,<18" },
     { name = "bbcode", specifier = ">=1.1,<2" },
     { name = "bdfparser", specifier = ">=2,<3" },
-    { name = "deno", specifier = ">=2.0.0" },
+    { name = "deno", marker = "extra == 'deno'", specifier = ">=2.0.0" },
     { name = "filetype", specifier = ">=1.2,<2" },
     { name = "imageio-ffmpeg", specifier = ">=0.6,<1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13,<2" },
@@ -610,7 +612,7 @@ requires-dist = [
     { name = "winloop", marker = "sys_platform == 'win32'", specifier = ">=0.2.3" },
     { name = "yt-dlp", extras = ["default", "curl-cffi"], specifier = ">=2026.3.13,<2027" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["deno", "dev"]
 
 [[package]]
 name = "multidict"
