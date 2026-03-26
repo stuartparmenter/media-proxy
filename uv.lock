@@ -374,15 +374,15 @@ wheels = [
 
 [[package]]
 name = "deno"
-version = "2.7.7"
+version = "2.7.8"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/87/b4/e893908807648b8c499a085cf47c9ca6418a060b0f12e73f128478ada409/deno-2.7.7.tar.gz", hash = "sha256:5798bba73f89ddf50fa33044c8a44fe708fb19ab77b3ef98d02f4124e760fb65", size = 8166, upload-time = "2026-03-19T13:57:09.905Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/a2/be9a469604823ee01b75bcbd2d0cb022f5735239f2ff30385fe3d62dbcff/deno-2.7.8.tar.gz", hash = "sha256:8df38542abcf110a9b674c9b8caf018e00e28d79c4aeb9aa2285502b32c3f5b1", size = 8167, upload-time = "2026-03-25T16:18:40.859Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/08/362f834c64798033ca56a02a1a4e8feca653b9b767aab4a854069ba8c801/deno-2.7.7-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:70be65294ee575b2e5ee66b587c459500984b1df17505fd6f5e7bffad402de0f", size = 46934365, upload-time = "2026-03-19T13:56:54.324Z" },
-    { url = "https://files.pythonhosted.org/packages/4a/3f/cdbe9daa33e997f26610ee7f554e51ba2c8fd7a18abcbc9c6069e6386164/deno-2.7.7-py3-none-macosx_11_0_arm64.whl", hash = "sha256:65641b2dd299e3a4aae4f080d4e32d632bbcf44d77f72f97f61aa7b68ded4747", size = 43831345, upload-time = "2026-03-19T13:56:57.565Z" },
-    { url = "https://files.pythonhosted.org/packages/25/e7/5f63b2a64fc2f7a7ce6c73e9e847c41034283890e6edec0b2791518b7edd/deno-2.7.7-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:cc90d761472df285a8709483d3615fbd2faf4bbc162530196b5a112e4a561016", size = 47571993, upload-time = "2026-03-19T13:57:00.833Z" },
-    { url = "https://files.pythonhosted.org/packages/e7/f2/68f4bb53de09970744f905628cff011bd6964f2f00f263140dcc9412a7b5/deno-2.7.7-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:8ced70363e30a7e3f27f614ffd46d69ccf1dd57633f0df6a3c6375ed2c803aa7", size = 49577613, upload-time = "2026-03-19T13:57:03.766Z" },
-    { url = "https://files.pythonhosted.org/packages/0e/db/2fa6239c0d4df46ef6f3f43d55133aeda6cdd6668c6044d275548a95da24/deno-2.7.7-py3-none-win_amd64.whl", hash = "sha256:e614f666c169ade86a3a089a15a32b9a2002d1ad3294f1fbc8a1bd50c2bac4ab", size = 48802184, upload-time = "2026-03-19T13:57:07.328Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/94/4745d48566669694db145ca51bb06b3e7a353c4f125ed8c399276f91db7e/deno-2.7.8-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:5f4a363df0cb6e4c54924127958aac4b3e5d5dbc6593db18d1ce0c514a19c6f7", size = 47884563, upload-time = "2026-03-25T16:18:24.847Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/55/c24ace595485d128e88f4737b40dfbd1ad8e517f5013d4cc7a042d4357e5/deno-2.7.8-py3-none-macosx_11_0_arm64.whl", hash = "sha256:edb91a01ca4ffa506f07132fbae995cf5c5460dd6851a99b654a22ecd9baed2d", size = 44638459, upload-time = "2026-03-25T16:18:28.399Z" },
+    { url = "https://files.pythonhosted.org/packages/80/cb/55918d92ca4f10559e957a9d8f47a9ae9fcf8e64978f4a93584b7e939ba9/deno-2.7.8-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:a4634f6d4d6d86704ae711446746d4e4352a008db42baf57be9cb7d14c49793d", size = 48411986, upload-time = "2026-03-25T16:18:31.918Z" },
+    { url = "https://files.pythonhosted.org/packages/32/c5/53c3bda91e7f5705de31d6f301d144e9b7dae6a68c082e874f2e1a1b7fbf/deno-2.7.8-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:4b13de1177e6712d34cfdf5975aeb754dffd436b9cb628540de053e54ce8c472", size = 50455925, upload-time = "2026-03-25T16:18:34.859Z" },
+    { url = "https://files.pythonhosted.org/packages/35/11/5b0daf3b4f03d00cbb42fba8b9a89496b03598b74cea5b7f5757f8654694/deno-2.7.8-py3-none-win_amd64.whl", hash = "sha256:a8acb5dd8d709c55f9db9ee6f5de936749ce165699c2b2fe331503f72549aa6e", size = 49491459, upload-time = "2026-03-25T16:18:38.282Z" },
 ]
 
 [[package]]
@@ -560,7 +560,7 @@ wheels = [
 
 [[package]]
 name = "media-proxy"
-version = "0.5.10"
+version = "0.5.11"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
