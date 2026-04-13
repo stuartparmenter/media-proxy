@@ -618,7 +618,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6,<7" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21" },
     { name = "winloop", marker = "sys_platform == 'win32'", specifier = ">=0.2.3" },
-    { name = "yt-dlp", extras = ["default", "curl-cffi"], specifier = ">=2026.3.13,<2027" },
+    { name = "yt-dlp", extras = ["default", "curl-cffi"], specifier = ">=2026.3.17,<2027" },
 ]
 provides-extras = ["deno", "dev"]
 
